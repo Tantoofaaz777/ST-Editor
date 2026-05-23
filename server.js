@@ -14,6 +14,8 @@ const authPassword = process.env.ST_EDITOR_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || "";
 const authEnabled = Boolean(authUser && authPassword && sessionSecret);
 const sessionCookieName = "st_editor_session";
+const sessionMaxAgeSeconds = 30 * 24 * 60 * 60;
+const sessionMaxAgeMs = sessionMaxAgeSeconds * 1000;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -65,7 +67,12 @@ function parseCookies(request) {
   for (const part of (request.headers.cookie || "").split(";")) {
     const [name, ...valueParts] = part.trim().split("=");
     if (!name) continue;
-    cookies[name] = decodeURIComponent(valueParts.join("="));
+    const rawValue = valueParts.join("=");
+    try {
+      cookies[name] = decodeURIComponent(rawValue);
+    } catch {
+      cookies[name] = rawValue;
+    }
   }
   return cookies;
 }
@@ -76,7 +83,8 @@ function signSession(value) {
 
 function createSessionCookie() {
   const createdAt = String(Date.now());
-  const payload = `${authUser}.${createdAt}`;
+  const user = Buffer.from(authUser, "utf8").toString("base64url");
+  const payload = `${user}.${createdAt}`;
   const signature = signSession(payload);
   return `${payload}.${signature}`;
 }
@@ -87,8 +95,16 @@ function isAuthenticated(request) {
   if (!cookie) return false;
   const parts = cookie.split(".");
   if (parts.length !== 3) return false;
+  let user;
+  const createdAt = Number(parts[1]);
+  try {
+    user = Buffer.from(parts[0], "base64url").toString("utf8");
+  } catch {
+    return false;
+  }
   const payload = `${parts[0]}.${parts[1]}`;
-  if (parts[0] !== authUser) return false;
+  if (user !== authUser) return false;
+  if (!Number.isFinite(createdAt) || Date.now() - createdAt > sessionMaxAgeMs) return false;
   const expected = signSession(payload);
   try {
     return crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(expected));
@@ -165,7 +181,7 @@ function handleLogin(request, response) {
         const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
         sendWithHeaders(response, 302, "", "text/plain; charset=utf-8", {
           Location: "/",
-          "Set-Cookie": `${sessionCookieName}=${encodeURIComponent(createSessionCookie())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`
+          "Set-Cookie": `${sessionCookieName}=${encodeURIComponent(createSessionCookie())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionMaxAgeSeconds}${secure}`
         });
         return;
       }
@@ -181,6 +197,19 @@ function handleLogout(response) {
   redirect(response, "/login", {
     "Set-Cookie": `${sessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
   });
+}
+
+function isPublicAuthAsset(pathname) {
+  return pathname === "/styles.css" || pathname.startsWith("/fonts/");
+}
+
+function sendAuthRequired(response) {
+  send(
+    response,
+    401,
+    JSON.stringify({ error: "Authentication required", code: "AUTH_REQUIRED" }),
+    mimeTypes[".json"]
+  );
 }
 
 function readRequestBody(request, response, callback) {
@@ -273,12 +302,15 @@ const server = http.createServer((request, response) => {
   }
 
   if (!isAuthenticated(request)) {
-    if (url.pathname.startsWith("/api/")) {
-      send(response, 401, JSON.stringify({ error: "Authentication required" }), mimeTypes[".json"]);
+    if (isPublicAuthAsset(url.pathname)) {
+      // Let the login page load its CSS and font assets.
+    } else if (url.pathname.startsWith("/api/")) {
+      sendAuthRequired(response);
+      return;
+    } else {
+      redirect(response, "/login");
       return;
     }
-    redirect(response, "/login");
-    return;
   }
 
   if (url.pathname === "/api/cards") {

@@ -84,6 +84,8 @@ let activeFullscreenTextarea = null;
 let isMarkdownPreviewActive = false;
 let pendingDeleteId = null;
 
+class AuthRequiredError extends Error {}
+
 const sortFieldLabels = {
   name: "Name",
   updatedAt: "Date modified",
@@ -251,13 +253,31 @@ function normalizeStoredCard(card) {
   };
 }
 
+async function redirectIfAuthRequired(response) {
+  if (response.status !== 401) return;
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (payload.code === "AUTH_REQUIRED") {
+    window.location.href = "/login";
+    throw new AuthRequiredError("Authentication required");
+  }
+}
+
 async function loadCards() {
   let serverCards = [];
   try {
     const response = await fetch("/api/cards");
-    if (!response.ok) throw new Error(`Could not load cards: ${response.status}`);
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not load cards: ${response.status}`);
+    }
     serverCards = await response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthRequiredError) return;
     try {
       serverCards = JSON.parse(localStorage.getItem(storageKey)) || [];
       showToast("Using browser backup. Could not read the app data folder.");
@@ -304,9 +324,13 @@ async function persistCards(cards = state.cards) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cards)
     });
-    if (!response.ok) throw new Error(`Could not save cards: ${response.status}`);
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not save cards: ${response.status}`);
+    }
     localStorage.removeItem(storageKey);
   } catch (error) {
+    if (error instanceof AuthRequiredError) return;
     console.error(error);
     localStorage.setItem(storageKey, JSON.stringify(cards));
     showToast("Could not save to the app folder. Saved a browser backup.");
