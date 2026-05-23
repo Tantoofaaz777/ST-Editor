@@ -262,7 +262,6 @@ async function redirectIfAuthRequired(response) {
     payload = {};
   }
   if (payload.code === "AUTH_REQUIRED") {
-    window.location.href = "/login";
     throw new AuthRequiredError("Authentication required");
   }
 }
@@ -337,7 +336,11 @@ async function persistCards(cards = state.cards) {
     }
     localStorage.removeItem(storageKey);
   } catch (error) {
-    if (error instanceof AuthRequiredError) return;
+    if (error instanceof AuthRequiredError) {
+      localStorage.setItem(storageKey, JSON.stringify(cards));
+      redirectToLogin();
+      return;
+    }
     console.error(error);
     localStorage.setItem(storageKey, JSON.stringify(cards));
     showToast("Could not save to the app folder. Saved a browser backup.");
