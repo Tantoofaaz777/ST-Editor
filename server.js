@@ -161,6 +161,17 @@ function redirect(response, location, headers = {}) {
   response.end();
 }
 
+function forwardedProto(request) {
+  return String(request.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+}
+
+function isSecureRequest(request) {
+  return forwardedProto(request) === "https";
+}
+
 function handleLogin(request, response) {
   if (!authEnabled) {
     redirect(response, "/");
@@ -178,7 +189,7 @@ function handleLogin(request, response) {
       const username = params.get("username") || "";
       const password = params.get("password") || "";
       if (username === authUser && password === authPassword) {
-        const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+        const secure = isSecureRequest(request) ? "; Secure" : "";
         sendWithHeaders(response, 302, "", "text/plain; charset=utf-8", {
           Location: "/",
           "Set-Cookie": `${sessionCookieName}=${encodeURIComponent(createSessionCookie())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionMaxAgeSeconds}${secure}`
