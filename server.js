@@ -1,11 +1,19 @@
 const http = require("http");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+
+loadDotEnv();
 
 const port = Number(process.env.PORT || 4173);
 const publicDir = path.join(__dirname, "public");
 const dataDir = path.join(__dirname, "data");
 const cardsFile = path.join(dataDir, "cards.json");
+const authUser = process.env.ST_EDITOR_USER || "";
+const authPassword = process.env.ST_EDITOR_PASSWORD || "";
+const sessionSecret = process.env.SESSION_SECRET || "";
+const authEnabled = Boolean(authUser && authPassword && sessionSecret);
+const sessionCookieName = "st_editor_session";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -19,12 +27,160 @@ const mimeTypes = {
   ".webp": "image/webp"
 };
 
+function loadDotEnv() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) return;
+  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const equalsIndex = trimmed.indexOf("=");
+    if (equalsIndex === -1) continue;
+    const key = trimmed.slice(0, equalsIndex).trim();
+    const rawValue = trimmed.slice(equalsIndex + 1).trim();
+    const value = rawValue.replace(/^["']|["']$/g, "");
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
 function send(response, status, body, contentType = "text/plain; charset=utf-8") {
   response.writeHead(status, {
     "Content-Type": contentType,
     "Cache-Control": "no-store"
   });
   response.end(body);
+}
+
+function sendWithHeaders(response, status, body, contentType, headers) {
+  response.writeHead(status, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    ...headers
+  });
+  response.end(body);
+}
+
+function parseCookies(request) {
+  const cookies = {};
+  for (const part of (request.headers.cookie || "").split(";")) {
+    const [name, ...valueParts] = part.trim().split("=");
+    if (!name) continue;
+    cookies[name] = decodeURIComponent(valueParts.join("="));
+  }
+  return cookies;
+}
+
+function signSession(value) {
+  return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url");
+}
+
+function createSessionCookie() {
+  const createdAt = String(Date.now());
+  const payload = `${authUser}.${createdAt}`;
+  const signature = signSession(payload);
+  return `${payload}.${signature}`;
+}
+
+function isAuthenticated(request) {
+  if (!authEnabled) return true;
+  const cookie = parseCookies(request)[sessionCookieName];
+  if (!cookie) return false;
+  const parts = cookie.split(".");
+  if (parts.length !== 3) return false;
+  const payload = `${parts[0]}.${parts[1]}`;
+  if (parts[0] !== authUser) return false;
+  const expected = signSession(payload);
+  try {
+    return crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+function loginPage(errorMessage = "") {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ST Editor Login</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-card">
+      <div class="mark">ST</div>
+      <h1>ST Editor</h1>
+      <p>Sign in to open your local library.</p>
+      ${errorMessage ? `<p class="login-error">${escapeHtml(errorMessage)}</p>` : ""}
+      <form method="post" action="/login">
+        <label>
+          <span>Username</span>
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function redirect(response, location, headers = {}) {
+  response.writeHead(302, {
+    Location: location,
+    "Cache-Control": "no-store",
+    ...headers
+  });
+  response.end();
+}
+
+function handleLogin(request, response) {
+  if (!authEnabled) {
+    redirect(response, "/");
+    return;
+  }
+
+  if (request.method === "GET") {
+    send(response, 200, loginPage(), mimeTypes[".html"]);
+    return;
+  }
+
+  if (request.method === "POST") {
+    readRequestBody(request, response, (body) => {
+      const params = new URLSearchParams(body);
+      const username = params.get("username") || "";
+      const password = params.get("password") || "";
+      if (username === authUser && password === authPassword) {
+        const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+        sendWithHeaders(response, 302, "", "text/plain; charset=utf-8", {
+          Location: "/",
+          "Set-Cookie": `${sessionCookieName}=${encodeURIComponent(createSessionCookie())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`
+        });
+        return;
+      }
+      send(response, 401, loginPage("Wrong username or password."), mimeTypes[".html"]);
+    });
+    return;
+  }
+
+  send(response, 405, "Method not allowed");
+}
+
+function handleLogout(response) {
+  redirect(response, "/login", {
+    "Set-Cookie": `${sessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
+  });
 }
 
 function readRequestBody(request, response, callback) {
@@ -106,6 +262,25 @@ function handleCardsApi(request, response) {
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
+  if (url.pathname === "/login") {
+    handleLogin(request, response);
+    return;
+  }
+
+  if (url.pathname === "/logout") {
+    handleLogout(response);
+    return;
+  }
+
+  if (!isAuthenticated(request)) {
+    if (url.pathname.startsWith("/api/")) {
+      send(response, 401, JSON.stringify({ error: "Authentication required" }), mimeTypes[".json"]);
+      return;
+    }
+    redirect(response, "/login");
+    return;
+  }
+
   if (url.pathname === "/api/cards") {
     handleCardsApi(request, response);
     return;
@@ -137,4 +312,7 @@ const server = http.createServer((request, response) => {
 server.listen(port, "0.0.0.0", () => {
   console.log(`ST Editor running at http://localhost:${port}`);
   console.log("Use your computer's local IP with the same port to open it on Android.");
+  if (!authEnabled) {
+    console.log("Authentication is disabled. Set ST_EDITOR_USER, ST_EDITOR_PASSWORD, and SESSION_SECRET in .env to enable it.");
+  }
 });

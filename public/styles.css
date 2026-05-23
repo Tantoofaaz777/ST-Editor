@@ -112,6 +112,12 @@ body.modal-open {
   overflow: hidden;
 }
 
+body.login-page {
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
 button,
 input,
 select,
@@ -587,6 +593,45 @@ button {
   background: linear-gradient(135deg, var(--accent), var(--warm));
   color: #101010;
   font-weight: 900;
+}
+
+.login-card {
+  display: grid;
+  gap: 1rem;
+  width: min(24rem, 100%);
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(32, 32, 32, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.login-card .mark {
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+.login-card h1 {
+  font-size: 1.65rem;
+}
+
+.login-card p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.login-card form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.login-error {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(240, 120, 120, 0.36);
+  border-radius: 0.65rem;
+  background: rgba(240, 120, 120, 0.08);
+  color: var(--danger) !important;
+  font-weight: 800;
 }
 
 h1,
