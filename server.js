@@ -193,7 +193,12 @@ function handleLogin(request, response) {
   send(response, 405, "Method not allowed");
 }
 
-function handleLogout(response) {
+function handleLogout(request, response) {
+  if (request.method !== "POST") {
+    send(response, 405, "Method not allowed");
+    return;
+  }
+
   redirect(response, "/login", {
     "Set-Cookie": `${sessionCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
   });
@@ -297,7 +302,7 @@ const server = http.createServer((request, response) => {
   }
 
   if (url.pathname === "/logout") {
-    handleLogout(response);
+    handleLogout(request, response);
     return;
   }
 

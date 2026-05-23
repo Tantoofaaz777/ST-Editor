@@ -267,6 +267,10 @@ async function redirectIfAuthRequired(response) {
   }
 }
 
+function redirectToLogin() {
+  window.location.href = "/login";
+}
+
 async function loadCards() {
   let serverCards = [];
   try {
@@ -277,7 +281,10 @@ async function loadCards() {
     }
     serverCards = await response.json();
   } catch (error) {
-    if (error instanceof AuthRequiredError) return;
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      throw error;
+    }
     try {
       serverCards = JSON.parse(localStorage.getItem(storageKey)) || [];
       showToast("Using browser backup. Could not read the app data folder.");
