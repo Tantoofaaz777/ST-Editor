@@ -1572,6 +1572,34 @@ summary {
     gap: 0.45rem;
   }
 
+  .library-section-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .library-view-tools {
+    position: static;
+    width: 100%;
+  }
+
+  .filter-menu {
+    position: static;
+  }
+
+  .filter-menu[open] {
+    display: grid;
+    flex: 1 0 100%;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .filter-panel {
+    position: static;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 0.45rem;
+  }
+
   .library-grid.is-list-view .library-item {
     grid-template-columns: 1fr;
   }
