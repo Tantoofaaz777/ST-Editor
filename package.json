@@ -1,0 +1,13 @@
+{
+  "name": "st-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local editor for SillyTavern character cards.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21",
+    "marked": "^12.0.2"
+  }
+}

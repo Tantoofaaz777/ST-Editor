@@ -1,0 +1,15 @@
+node_modules/
+
+# Local app data
+data/cards.json
+data/*.tmp
+
+# Local-only reference/test files
+screenshots/
+From 2.0.png
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+.env
