@@ -506,6 +506,9 @@ button {
   padding: 0;
   background: transparent;
   color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 900;
+  line-height: 1.12;
   text-shadow: none;
 }
 
@@ -1617,11 +1620,15 @@ summary {
 
   .library-item h3 {
     padding: 2rem 0.35rem 0.48rem;
-    font-size: 0.76rem;
+    font-size: 0.86rem;
   }
 
   .library-grid.is-list-view .library-item {
     grid-template-columns: 1fr;
+  }
+
+  .library-grid.is-list-view .library-item h3 {
+    font-size: 1.22rem;
   }
 
   .library-grid.is-list-view .library-item__meta {
