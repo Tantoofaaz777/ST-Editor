@@ -513,11 +513,16 @@ button {
   display: block;
 }
 
+.library-grid.is-list-view .library-item__top > div:last-child {
+  height: auto;
+  width: auto;
+}
+
 .library-item__top {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0;
   min-width: 0;
 }
 
@@ -566,6 +571,7 @@ button {
 }
 
 .library-item__top > div:last-child {
+  height: 0;
   min-width: 0;
   width: 100%;
 }
