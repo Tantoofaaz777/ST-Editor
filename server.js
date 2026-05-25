@@ -14,6 +14,7 @@ const authUser = process.env.ST_EDITOR_USER || "";
 const authPassword = process.env.ST_EDITOR_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || "";
 const authEnabled = Boolean(authUser && authPassword && sessionSecret);
+const authPartiallyConfigured = !authEnabled && Boolean(authUser || authPassword || sessionSecret);
 const sessionCookieName = "st_editor_session";
 const sessionMaxAgeSeconds = 30 * 24 * 60 * 60;
 const sessionMaxAgeMs = sessionMaxAgeSeconds * 1000;
@@ -29,6 +30,12 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp"
 };
+
+if (authPartiallyConfigured) {
+  throw new Error(
+    "Incomplete auth configuration: ST_EDITOR_USER, ST_EDITOR_PASSWORD, and SESSION_SECRET must all be set together."
+  );
+}
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, ".env");
@@ -358,16 +365,12 @@ function handleCardsApi(request, response, url) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/cards") {
-    fs.readFile(cardsFile, "utf8", (error, data) => {
-      if (error && error.code === "ENOENT") {
-        sendJson(request, response, 200, "[]");
-        return;
-      }
+    readCards((error, cards = []) => {
       if (error) {
         sendJson(request, response, 500, { error: "Could not read cards" });
         return;
       }
-      sendJson(request, response, 200, data || "[]");
+      sendJson(request, response, 200, cards);
     });
     return;
   }

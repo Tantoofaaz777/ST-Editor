@@ -1,6 +1,7 @@
 import { renderMarkdown } from "./vendor/markdown.js";
 
 const storageKey = "st-editor.cards.v1";
+const recoveryStorageKey = "st-editor.auth-recovery.v1";
 
 const fields = [
   "name",
@@ -266,8 +267,56 @@ function normalizeStoredCard(card) {
 function toStoredCard(card) {
   const storedCard = cloneCard(card);
   delete storedCard.hasImage;
+  delete storedCard.hasThumbnail;
   delete storedCard.imageLoaded;
+  delete storedCard.thumbnailLoaded;
+  if (!storedCard.imageDataUrl) delete storedCard.imageDataUrl;
+  if (!storedCard.imageThumbnailDataUrl) delete storedCard.imageThumbnailDataUrl;
   return storedCard;
+}
+
+function cardsForRecovery(cards = state.cards) {
+  const recoveryCards = cards.map(toStoredCard);
+  if (!state.draftCard) return recoveryCards;
+  const draftCard = toStoredCard(state.draftCard);
+  const draftIndex = recoveryCards.findIndex((card) => card.id === draftCard.id);
+  if (draftIndex >= 0) {
+    recoveryCards[draftIndex] = draftCard;
+  } else {
+    recoveryCards.unshift(draftCard);
+  }
+  return recoveryCards;
+}
+
+function saveRecoverySnapshot(cards = cardsForRecovery()) {
+  localStorage.setItem(recoveryStorageKey, JSON.stringify(cards));
+}
+
+function restoreRecoverySnapshot(serverCards) {
+  let recoveryCards = [];
+  try {
+    recoveryCards = JSON.parse(localStorage.getItem(recoveryStorageKey)) || [];
+  } catch {
+    recoveryCards = [];
+  }
+
+  if (!Array.isArray(recoveryCards) || !recoveryCards.length) return serverCards;
+
+  const mergedCards = serverCards.map(normalizeStoredCard);
+  for (const recoveryCard of recoveryCards.map(normalizeStoredCard)) {
+    const index = mergedCards.findIndex((card) => card.id === recoveryCard.id);
+    if (index >= 0) {
+      const serverTime = cardDateValue(mergedCards[index], "updatedAt");
+      const recoveryTime = cardDateValue(recoveryCard, "updatedAt");
+      if (recoveryTime >= serverTime) mergedCards[index] = recoveryCard;
+    } else {
+      mergedCards.unshift(recoveryCard);
+    }
+  }
+
+  localStorage.removeItem(recoveryStorageKey);
+  showToast("Recovered unsaved changes from before sign-in.");
+  return mergedCards;
 }
 
 async function redirectIfAuthRequired(response) {
@@ -321,7 +370,10 @@ async function loadCards() {
     await persistCards(serverCards);
   }
 
-  state.cards = Array.isArray(serverCards) ? serverCards.map(normalizeStoredCard) : [];
+  const normalizedServerCards = Array.isArray(serverCards)
+    ? serverCards.map(normalizeStoredCard)
+    : [];
+  state.cards = restoreRecoverySnapshot(normalizedServerCards);
   state.activeId = state.cards[0]?.id || null;
 }
 
@@ -343,7 +395,7 @@ async function persistCards(cards = state.cards) {
     localStorage.removeItem(storageKey);
   } catch (error) {
     if (error instanceof AuthRequiredError) {
-      localStorage.setItem(storageKey, JSON.stringify(cards));
+      saveRecoverySnapshot(cardsForRecovery(cards));
       redirectToLogin();
       return;
     }
@@ -873,9 +925,26 @@ function createCard() {
   showEditor();
 }
 
-function duplicateCard() {
+async function duplicateCard() {
   readForm();
-  const current = editorCard();
+  let current = editorCard();
+  try {
+    current = await loadFullImageForExport(current);
+    if (state.draftCard && current !== state.draftCard) {
+      state.draftCard.imageDataUrl = current.imageDataUrl || "";
+      state.draftCard.imageLoaded = current.imageLoaded;
+      current = state.draftCard;
+    }
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      saveRecoverySnapshot();
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load the full image before duplicating.");
+    return;
+  }
   const clone = cloneCard(current);
   clone.id = uid();
   clone.updatedAt = new Date().toISOString();
@@ -945,7 +1014,7 @@ async function exportActiveCardPng() {
     }
   } catch (error) {
     if (error instanceof AuthRequiredError) {
-      localStorage.setItem(storageKey, JSON.stringify(state.cards.map(toStoredCard)));
+      saveRecoverySnapshot();
       redirectToLogin();
       return;
     }
