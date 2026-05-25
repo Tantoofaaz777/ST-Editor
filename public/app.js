@@ -2,6 +2,7 @@ import { countTokens } from "./vendor/tokenizer.js";
 import { renderMarkdown } from "./vendor/markdown.js";
 
 const storageKey = "st-editor.cards.v1";
+const tokenCountCache = new WeakMap();
 
 const fields = [
   "name",
@@ -235,11 +236,16 @@ function splitLinesOrCommas(value) {
 }
 
 function normalizeStoredCard(card) {
+  const hasImageField = Object.prototype.hasOwnProperty.call(card, "imageDataUrl");
+  const imageDataUrl = typeof card.imageDataUrl === "string" ? card.imageDataUrl : "";
   return {
     ...emptyCard(),
     ...card,
     createdAt: card.createdAt || card.updatedAt || new Date().toISOString(),
     updatedAt: card.updatedAt || card.createdAt || new Date().toISOString(),
+    imageDataUrl,
+    hasImage: Boolean(imageDataUrl || card.hasImage),
+    imageLoaded: hasImageField || !card.hasImage,
     data: {
       ...emptyCard().data,
       ...(card.data || {}),
@@ -251,6 +257,13 @@ function normalizeStoredCard(card) {
         card.data?.extensions && typeof card.data.extensions === "object" ? card.data.extensions : {}
     }
   };
+}
+
+function toStoredCard(card) {
+  const storedCard = cloneCard(card);
+  delete storedCard.hasImage;
+  delete storedCard.imageLoaded;
+  return storedCard;
 }
 
 async function redirectIfAuthRequired(response) {
@@ -273,7 +286,7 @@ function redirectToLogin() {
 async function loadCards() {
   let serverCards = [];
   try {
-    const response = await fetch("/api/cards");
+    const response = await fetch("/api/cards/summary");
     if (!response.ok) {
       await redirectIfAuthRequired(response);
       throw new Error(`Could not load cards: ${response.status}`);
@@ -309,14 +322,19 @@ async function loadCards() {
 }
 
 function cardTokenCount(card) {
-  return countTokens([
+  const source = [
     card.data.name,
     card.data.description,
     card.data.personality,
     card.data.scenario,
     card.data.first_mes,
     card.data.mes_example
-  ].join("\n"));
+  ].join("\n");
+  const cached = tokenCountCache.get(card);
+  if (cached?.source === source) return cached.count;
+  const count = countTokens(source);
+  tokenCountCache.set(card, { source, count });
+  return count;
 }
 
 function cardDateValue(card, key) {
@@ -328,7 +346,7 @@ async function persistCards(cards = state.cards) {
     const response = await fetch("/api/cards", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cards)
+      body: JSON.stringify(cards.map(toStoredCard))
     });
     if (!response.ok) {
       await redirectIfAuthRequired(response);
@@ -357,6 +375,19 @@ function activeCard() {
 
 function editorCard() {
   return state.draftCard || activeCard();
+}
+
+async function loadFullCard(card) {
+  if (!card || card.imageLoaded || !card.hasImage) return card;
+  const response = await fetch(`/api/cards/${encodeURIComponent(card.id)}`);
+  if (!response.ok) {
+    await redirectIfAuthRequired(response);
+    throw new Error(`Could not load card: ${response.status}`);
+  }
+  const fullCard = normalizeStoredCard(await response.json());
+  const index = state.cards.findIndex((item) => item.id === fullCard.id);
+  if (index !== -1) state.cards[index] = fullCard;
+  return fullCard;
 }
 
 function syncDraftToLibrary() {
@@ -827,11 +858,21 @@ function showLibrary() {
   renderLibrary();
 }
 
-function showEditor() {
+async function showEditor() {
   state.view = "editor";
   elements.libraryView.classList.add("is-hidden");
   elements.editorView.classList.remove("is-hidden");
-  const card = activeCard();
+  let card = activeCard();
+  try {
+    card = await loadFullCard(card);
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load this card image.");
+  }
   state.draftCard = card ? cloneCard(card) : null;
   if (state.draftCard) writeForm(state.draftCard);
   setSaveStatus(false);
@@ -943,6 +984,8 @@ async function importCard(file) {
     const json = readCardJsonFromPng(bytes);
     const card = normalizeImportedCard(json);
     card.imageDataUrl = await fileToDataUrl(file);
+    card.hasImage = true;
+    card.imageLoaded = true;
     state.cards.unshift(card);
     state.activeId = card.id;
     persistCards();
@@ -966,6 +1009,8 @@ async function setCardImage(file) {
   const card = editorCard();
   if (!card) return;
   card.imageDataUrl = await fileToDataUrl(file);
+  card.hasImage = true;
+  card.imageLoaded = true;
   setSaveStatus(true);
   updatePreview();
 }

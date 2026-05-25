@@ -2,6 +2,7 @@ const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 
 loadDotEnv();
 
@@ -60,6 +61,31 @@ function sendWithHeaders(response, status, body, contentType, headers) {
     ...headers
   });
   response.end(body);
+}
+
+function acceptsGzip(request) {
+  return String(request.headers["accept-encoding"] || "")
+    .split(",")
+    .some((encoding) => encoding.trim().toLowerCase().startsWith("gzip"));
+}
+
+function sendJson(request, response, status, body) {
+  const payload = typeof body === "string" ? body : JSON.stringify(body);
+  if (!acceptsGzip(request)) {
+    send(response, status, payload, mimeTypes[".json"]);
+    return;
+  }
+
+  zlib.gzip(payload, (error, compressed) => {
+    if (error) {
+      send(response, status, payload, mimeTypes[".json"]);
+      return;
+    }
+    sendWithHeaders(response, status, compressed, mimeTypes[".json"], {
+      "Content-Encoding": "gzip",
+      Vary: "Accept-Encoding"
+    });
+  });
 }
 
 function parseCookies(request) {
@@ -246,54 +272,132 @@ function readRequestBody(request, response, callback) {
   });
 }
 
-function handleCardsApi(request, response) {
-  if (request.method === "GET") {
-    fs.readFile(cardsFile, "utf8", (error, data) => {
-      if (error && error.code === "ENOENT") {
-        send(response, 200, "[]", mimeTypes[".json"]);
-        return;
-      }
+function readCards(callback) {
+  fs.readFile(cardsFile, "utf8", (error, data) => {
+    if (error && error.code === "ENOENT") {
+      callback(null, []);
+      return;
+    }
+    if (error) {
+      callback(error);
+      return;
+    }
+    try {
+      const cards = JSON.parse((data || "[]").replace(/^\uFEFF/, ""));
+      callback(null, Array.isArray(cards) ? cards : []);
+    } catch (parseError) {
+      callback(parseError);
+    }
+  });
+}
+
+function lightCard(card) {
+  const { imageDataUrl, ...summary } = card;
+  return {
+    ...summary,
+    hasImage: Boolean(imageDataUrl)
+  };
+}
+
+function mergeStoredImages(cards, callback) {
+  readCards((error, storedCards = []) => {
+    if (error) {
+      callback(cards);
+      return;
+    }
+    const storedImages = new Map(
+      storedCards
+        .filter((card) => card && card.id && card.imageDataUrl)
+        .map((card) => [card.id, card.imageDataUrl])
+    );
+    callback(
+      cards.map((card) => ({
+        ...card,
+        imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || ""
+      }))
+    );
+  });
+}
+
+function handleCardsApi(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/cards/summary") {
+    readCards((error, cards = []) => {
       if (error) {
-        send(response, 500, JSON.stringify({ error: "Could not read cards" }), mimeTypes[".json"]);
+        sendJson(request, response, 500, { error: "Could not read cards" });
         return;
       }
-      send(response, 200, data || "[]", mimeTypes[".json"]);
+      sendJson(request, response, 200, cards.map(lightCard));
     });
     return;
   }
 
-  if (request.method === "PUT") {
+  const singleCardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
+  if (request.method === "GET" && singleCardMatch) {
+    const cardId = decodeURIComponent(singleCardMatch[1]);
+    readCards((error, cards = []) => {
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not read cards" });
+        return;
+      }
+      const card = cards.find((item) => item.id === cardId);
+      if (!card) {
+        sendJson(request, response, 404, { error: "Card not found" });
+        return;
+      }
+      sendJson(request, response, 200, card);
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/cards") {
+    fs.readFile(cardsFile, "utf8", (error, data) => {
+      if (error && error.code === "ENOENT") {
+        sendJson(request, response, 200, "[]");
+        return;
+      }
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not read cards" });
+        return;
+      }
+      sendJson(request, response, 200, data || "[]");
+    });
+    return;
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/cards") {
     readRequestBody(request, response, (body) => {
       let cards;
       try {
         cards = JSON.parse(body);
       } catch {
-        send(response, 400, JSON.stringify({ error: "Invalid JSON" }), mimeTypes[".json"]);
+        sendJson(request, response, 400, { error: "Invalid JSON" });
         return;
       }
       if (!Array.isArray(cards)) {
-        send(response, 400, JSON.stringify({ error: "Cards payload must be an array" }), mimeTypes[".json"]);
+        sendJson(request, response, 400, { error: "Cards payload must be an array" });
         return;
       }
 
       fs.mkdir(dataDir, { recursive: true }, (mkdirError) => {
         if (mkdirError) {
-          send(response, 500, JSON.stringify({ error: "Could not create data folder" }), mimeTypes[".json"]);
+          sendJson(request, response, 500, { error: "Could not create data folder" });
           return;
         }
 
         const tempFile = `${cardsFile}.tmp`;
-        fs.writeFile(tempFile, JSON.stringify(cards, null, 2), "utf8", (writeError) => {
-          if (writeError) {
-            send(response, 500, JSON.stringify({ error: "Could not save cards" }), mimeTypes[".json"]);
-            return;
-          }
-          fs.rename(tempFile, cardsFile, (renameError) => {
-            if (renameError) {
-              send(response, 500, JSON.stringify({ error: "Could not finish saving cards" }), mimeTypes[".json"]);
+        mergeStoredImages(cards, (cardsToSave) => {
+          fs.writeFile(tempFile, JSON.stringify(cardsToSave, null, 2), "utf8", (writeError) => {
+            if (writeError) {
+              sendJson(request, response, 500, { error: "Could not save cards" });
               return;
             }
-            send(response, 200, JSON.stringify({ ok: true }), mimeTypes[".json"]);
+            fs.rename(tempFile, cardsFile, (renameError) => {
+              if (renameError) {
+                sendJson(request, response, 500, { error: "Could not finish saving cards" });
+                return;
+              }
+              sendJson(request, response, 200, { ok: true });
+            });
           });
         });
       });
@@ -329,8 +433,8 @@ const server = http.createServer((request, response) => {
     }
   }
 
-  if (url.pathname === "/api/cards") {
-    handleCardsApi(request, response);
+  if (url.pathname === "/api/cards" || url.pathname.startsWith("/api/cards/")) {
+    handleCardsApi(request, response, url);
     return;
   }
 
