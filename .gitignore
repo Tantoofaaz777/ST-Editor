@@ -2,6 +2,7 @@ node_modules/
 
 # Local app data
 data/cards.json
+data/personas.json
 data/*.tmp
 data/assets/
 

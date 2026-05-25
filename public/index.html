@@ -19,8 +19,8 @@
           </div>
 
           <div class="segmented-control library-tabs" aria-label="Item type">
-            <button class="active" type="button">Characters</button>
-            <button type="button" disabled>Personas</button>
+            <button class="active" id="characters-tab" type="button" data-library-type="characters">Characters</button>
+            <button type="button" id="personas-tab" data-library-type="personas">Personas</button>
             <button type="button" disabled>Presets</button>
           </div>
         </header>
@@ -108,6 +108,83 @@
           <h3>No characters found</h3>
           <p>Create a new character or clear your search.</p>
         </div>
+      </section>
+
+      <section class="view persona-editor-view is-hidden" id="persona-editor-view" aria-label="Persona editor">
+        <main class="workspace">
+          <header class="topbar">
+            <div class="title-stack">
+              <button class="back-button" id="persona-back-button" type="button">← Library</button>
+              <span class="save-status-pill" id="persona-save-status-pill">Saved</span>
+              <h2 class="sr-only" id="persona-screen-title">New persona</h2>
+            </div>
+            <div class="actions editor-actions">
+              <button class="ghost danger icon-action" id="persona-delete-button" type="button" aria-label="Delete" title="Delete">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M4 7h16" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                  <path d="M6 7l1 14h10l1-14" />
+                  <path d="M9 7V4h6v3" />
+                </svg>
+              </button>
+              <button class="ghost icon-action" id="persona-copy-button" type="button" aria-label="Copy description" title="Copy description">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M8 8h11v11H8z" />
+                  <path d="M5 16V5h11" />
+                </svg>
+              </button>
+              <button class="ghost icon-action" id="persona-download-image-button" type="button" aria-label="Download image" title="Download image">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M12 3v12" />
+                  <path d="M7 10l5 5 5-5" />
+                  <path d="M5 19h14" />
+                </svg>
+              </button>
+              <button class="primary icon-action" id="persona-save-button" type="button" aria-label="Save" title="Save">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M5 3h12l2 2v16H5z" />
+                  <path d="M8 3v6h8" />
+                  <path d="M8 21v-7h8v7" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <section class="editor-grid persona-editor-grid">
+            <form class="editor-panel" id="persona-form">
+              <label>
+                <span>Name</span>
+                <input id="persona-name" name="name" autocomplete="off" placeholder="Persona name" />
+              </label>
+
+              <label>
+                <span>Description</span>
+                <textarea id="persona-description" name="description" rows="16" placeholder="Write the persona text you want to copy into SillyTavern."></textarea>
+              </label>
+            </form>
+
+            <aside class="preview-panel persona-preview-panel" aria-label="Persona preview">
+              <label class="portrait" id="persona-portrait" aria-label="Choose persona image">
+                <img id="persona-portrait-image" alt="" hidden />
+                <span id="persona-portrait-initial">?</span>
+                <span class="portrait-camera" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 7h3l2-3h6l2 3h3v13H4z" />
+                    <path d="M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+                  </svg>
+                </span>
+                <input id="persona-image-input" type="file" accept="image/png,image/jpeg,image/webp" />
+              </label>
+
+              <div class="preview-header">
+                <h3 id="persona-preview-name">Untitled persona</h3>
+              </div>
+
+              <p class="preview-description" id="persona-preview-description">No description yet.</p>
+            </aside>
+          </section>
+        </main>
       </section>
 
       <section class="view editor-view is-hidden" id="editor-view" aria-label="Character editor">
@@ -262,8 +339,8 @@
       <div class="confirm-modal__scrim" data-confirm-cancel></div>
       <section class="confirm-modal__panel" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
         <div>
-          <span class="confirm-modal__eyebrow">Delete character</span>
-          <h2 id="delete-confirm-title">Delete this card?</h2>
+          <span class="confirm-modal__eyebrow">Delete item</span>
+          <h2 id="delete-confirm-title">Delete this item?</h2>
           <p id="delete-confirm-message">This action cannot be undone.</p>
         </div>
         <div class="confirm-modal__actions">

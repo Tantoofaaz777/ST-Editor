@@ -11,6 +11,7 @@ const publicDir = path.join(__dirname, "public");
 const dataDir = path.join(__dirname, "data");
 const assetsDir = path.join(dataDir, "assets");
 const cardsFile = path.join(dataDir, "cards.json");
+const personasFile = path.join(dataDir, "personas.json");
 const authUser = process.env.ST_EDITOR_USER || "";
 const authPassword = process.env.ST_EDITOR_PASSWORD || "";
 const sessionSecret = process.env.SESSION_SECRET || "";
@@ -288,8 +289,8 @@ function readRequestBody(request, response, callback) {
   });
 }
 
-function readCards(callback) {
-  fs.readFile(cardsFile, "utf8", (error, data) => {
+function readJsonArray(file, callback) {
+  fs.readFile(file, "utf8", (error, data) => {
     if (error && error.code === "ENOENT") {
       callback(null, []);
       return;
@@ -305,6 +306,14 @@ function readCards(callback) {
       callback(parseError);
     }
   });
+}
+
+function readCards(callback) {
+  readJsonArray(cardsFile, callback);
+}
+
+function readPersonas(callback) {
+  readJsonArray(personasFile, callback);
 }
 
 function isRecord(value) {
@@ -339,9 +348,13 @@ function safeAssetId(value) {
   return String(value || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 96);
 }
 
-function assetUrl(cardId, kind, updatedAt) {
+function assetUrlFor(collection, itemId, kind, updatedAt) {
   const version = encodeURIComponent(updatedAt || "");
-  return `/api/cards/${encodeURIComponent(cardId)}/${kind}${version ? `?v=${version}` : ""}`;
+  return `/api/${collection}/${encodeURIComponent(itemId)}/${kind}${version ? `?v=${version}` : ""}`;
+}
+
+function assetUrl(cardId, kind, updatedAt) {
+  return assetUrlFor("cards", cardId, kind, updatedAt);
 }
 
 function writeDataUrlAsset(card, field, pathField, kind, callback) {
@@ -424,22 +437,30 @@ function extractAssets(cards, callback) {
   next();
 }
 
-function writeCards(cards, callback) {
+function writeJsonArray(file, items, callback) {
   fs.mkdir(dataDir, { recursive: true }, (mkdirError) => {
     if (mkdirError) {
       callback(mkdirError);
       return;
     }
 
-    const tempFile = `${cardsFile}.tmp`;
-    fs.writeFile(tempFile, JSON.stringify(cards, null, 2), "utf8", (writeError) => {
+    const tempFile = `${file}.tmp`;
+    fs.writeFile(tempFile, JSON.stringify(items, null, 2), "utf8", (writeError) => {
       if (writeError) {
         callback(writeError);
         return;
       }
-      fs.rename(tempFile, cardsFile, callback);
+      fs.rename(tempFile, file, callback);
     });
   });
+}
+
+function writeCards(cards, callback) {
+  writeJsonArray(cardsFile, cards, callback);
+}
+
+function writePersonas(personas, callback) {
+  writeJsonArray(personasFile, personas, callback);
 }
 
 function readMigratedCards(callback) {
@@ -468,6 +489,32 @@ function readMigratedCards(callback) {
   });
 }
 
+function readMigratedPersonas(callback) {
+  readPersonas((readError, personas = []) => {
+    if (readError) {
+      callback(readError);
+      return;
+    }
+    extractAssets(personas, (assetError, migratedPersonas, changed) => {
+      if (assetError) {
+        callback(assetError);
+        return;
+      }
+      if (!changed) {
+        callback(null, migratedPersonas);
+        return;
+      }
+      writePersonas(migratedPersonas, (writeError) => {
+        if (writeError) {
+          callback(writeError);
+          return;
+        }
+        callback(null, migratedPersonas);
+      });
+    });
+  });
+}
+
 function lightCard(card) {
   if (!isRecord(card)) return {};
   const { imageDataUrl, imageThumbnailDataUrl, imagePath, thumbnailPath, ...summary } = card;
@@ -479,6 +526,20 @@ function lightCard(card) {
     hasThumbnail,
     imageUrl: hasImage ? assetUrl(card.id, "image", card.updatedAt) : "",
     thumbnailUrl: hasThumbnail ? assetUrl(card.id, "thumbnail", card.updatedAt) : ""
+  };
+}
+
+function lightPersona(persona) {
+  if (!isRecord(persona)) return {};
+  const { imageDataUrl, imageThumbnailDataUrl, imagePath, thumbnailPath, ...summary } = persona;
+  const hasImage = Boolean(imageDataUrl || persona.imagePath || imageThumbnailDataUrl || persona.thumbnailPath);
+  const hasThumbnail = Boolean(imageThumbnailDataUrl || persona.thumbnailPath);
+  return {
+    ...summary,
+    hasImage,
+    hasThumbnail,
+    imageUrl: hasImage ? assetUrlFor("personas", persona.id, "image", persona.updatedAt) : "",
+    thumbnailUrl: hasThumbnail ? assetUrlFor("personas", persona.id, "thumbnail", persona.updatedAt) : ""
   };
 }
 
@@ -511,6 +572,35 @@ function mergeStoredImages(cards, callback) {
   });
 }
 
+function mergeStoredPersonaImages(personas, callback) {
+  readMigratedPersonas((error, storedPersonas = []) => {
+    if (error) {
+      callback(personas);
+      return;
+    }
+    const storedImages = new Map(
+      storedPersonas
+        .filter((persona) => persona && persona.id && persona.imagePath)
+        .map((persona) => [persona.id, persona.imagePath])
+    );
+    const storedThumbnails = new Map(
+      storedPersonas
+        .filter((persona) => persona && persona.id && persona.thumbnailPath)
+        .map((persona) => [persona.id, persona.thumbnailPath])
+    );
+    callback(
+      personas.map((persona) => {
+        if (!isRecord(persona)) return persona;
+        return {
+          ...persona,
+          imagePath: persona.imagePath || storedImages.get(persona.id) || "",
+          thumbnailPath: persona.thumbnailPath || storedThumbnails.get(persona.id) || ""
+        };
+      })
+    );
+  });
+}
+
 function safeAssetPath(relativePath) {
   if (!relativePath) return "";
   const normalized = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, "").replace(/^[/\\]/, "");
@@ -533,6 +623,36 @@ function sendCardAsset(request, response, cardId, kind) {
     }
 
     const relativePath = kind === "thumbnail" ? card.thumbnailPath : card.imagePath;
+    const filePath = safeAssetPath(relativePath);
+    if (!filePath) {
+      sendJson(request, response, 404, { error: "Image not found" });
+      return;
+    }
+
+    fs.readFile(filePath, (readError, data) => {
+      if (readError) {
+        sendJson(request, response, 404, { error: "Image not found" });
+        return;
+      }
+      const extension = path.extname(filePath).toLowerCase();
+      sendAsset(response, 200, data, mimeTypes[extension] || "application/octet-stream");
+    });
+  });
+}
+
+function sendPersonaAsset(request, response, personaId, kind) {
+  readMigratedPersonas((error, personas = []) => {
+    if (error) {
+      sendJson(request, response, 500, { error: "Could not read personas" });
+      return;
+    }
+    const persona = personas.find((item) => isRecord(item) && item.id === personaId);
+    if (!persona) {
+      sendJson(request, response, 404, { error: "Persona not found" });
+      return;
+    }
+
+    const relativePath = kind === "thumbnail" ? persona.thumbnailPath : persona.imagePath;
     const filePath = safeAssetPath(relativePath);
     if (!filePath) {
       sendJson(request, response, 404, { error: "Image not found" });
@@ -637,6 +757,93 @@ function handleCardsApi(request, response, url) {
   send(response, 405, JSON.stringify({ error: "Method not allowed" }), mimeTypes[".json"]);
 }
 
+function handlePersonasApi(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/personas/summary") {
+    readMigratedPersonas((error, personas = []) => {
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not read personas" });
+        return;
+      }
+      sendJson(request, response, 200, personas.filter(isRecord).map(lightPersona));
+    });
+    return;
+  }
+
+  const assetMatch = url.pathname.match(/^\/api\/personas\/([^/]+)\/(thumbnail|image)$/);
+  if (request.method === "GET" && assetMatch) {
+    sendPersonaAsset(request, response, decodeURIComponent(assetMatch[1]), assetMatch[2]);
+    return;
+  }
+
+  const singlePersonaMatch = url.pathname.match(/^\/api\/personas\/([^/]+)$/);
+  if (request.method === "GET" && singlePersonaMatch) {
+    const personaId = decodeURIComponent(singlePersonaMatch[1]);
+    readMigratedPersonas((error, personas = []) => {
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not read personas" });
+        return;
+      }
+      const persona = personas.find((item) => isRecord(item) && item.id === personaId);
+      if (!persona) {
+        sendJson(request, response, 404, { error: "Persona not found" });
+        return;
+      }
+      sendJson(request, response, 200, lightPersona(persona));
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/personas") {
+    readMigratedPersonas((error, personas = []) => {
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not read personas" });
+        return;
+      }
+      sendJson(request, response, 200, personas);
+    });
+    return;
+  }
+
+  if (request.method === "PUT" && url.pathname === "/api/personas") {
+    readRequestBody(request, response, (body) => {
+      let personas;
+      try {
+        personas = JSON.parse(body);
+      } catch {
+        sendJson(request, response, 400, { error: "Invalid JSON" });
+        return;
+      }
+      if (!Array.isArray(personas)) {
+        sendJson(request, response, 400, { error: "Personas payload must be an array" });
+        return;
+      }
+      if (!personas.every(isRecord)) {
+        sendJson(request, response, 400, { error: "Personas payload entries must be objects" });
+        return;
+      }
+
+      mergeStoredPersonaImages(personas, (personasToMerge) => {
+        extractAssets(personasToMerge, (assetError, personasToSave) => {
+          if (assetError) {
+            sendJson(request, response, 500, { error: "Could not save images" });
+            return;
+          }
+          writePersonas(personasToSave, (writeError) => {
+            if (writeError) {
+              sendJson(request, response, 500, { error: "Could not save personas" });
+              return;
+            }
+            sendJson(request, response, 200, { ok: true });
+          });
+        });
+      });
+    });
+    return;
+  }
+
+  send(response, 405, JSON.stringify({ error: "Method not allowed" }), mimeTypes[".json"]);
+}
+
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
@@ -664,6 +871,11 @@ const server = http.createServer((request, response) => {
 
   if (url.pathname === "/api/cards" || url.pathname.startsWith("/api/cards/")) {
     handleCardsApi(request, response, url);
+    return;
+  }
+
+  if (url.pathname === "/api/personas" || url.pathname.startsWith("/api/personas/")) {
+    handlePersonasApi(request, response, url);
     return;
   }
 
