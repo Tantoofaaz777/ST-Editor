@@ -74,7 +74,6 @@
                     <div class="custom-select__menu" hidden>
                       <button type="button" data-value="name">Name</button>
                       <button type="button" data-value="updatedAt">Date modified</button>
-                      <button type="button" data-value="tokens">Token count</button>
                       <button type="button" data-value="createdAt">Date created</button>
                     </div>
                   </div>
@@ -218,7 +217,7 @@
                 <div class="details-content">
                   <label>
                     <span>Creator notes</span>
-                    <textarea id="creator_notes" name="creator_notes" rows="4" data-no-token-counter="true" placeholder="Describe the bot, give use tips, or list the chat models it has been tested on. This will be displayed in the character list."></textarea>
+                    <textarea id="creator_notes" name="creator_notes" rows="4" placeholder="Describe the bot, give use tips, or list the chat models it has been tested on. This will be displayed in the character list."></textarea>
                   </label>
                   <label>
                     <span>System prompt</span>
@@ -247,7 +246,6 @@
 
               <div class="preview-header">
                 <h3 id="preview-name">Untitled</h3>
-                <span class="preview-token-pill" id="preview-token-count">0 tokens</span>
               </div>
 
               <div class="tag-strip" id="preview-tags"></div>
@@ -278,7 +276,6 @@
       <div class="fullscreen-editor__bar">
         <button class="fullscreen-back-button" id="fullscreen-editor-back" type="button" aria-label="Close editor">←</button>
         <h2 id="fullscreen-editor-title">Editor</h2>
-        <span class="fullscreen-token-count" id="fullscreen-token-count">0 tokens</span>
         <div class="fullscreen-actions">
           <button class="ghost fullscreen-markdown-toggle icon-action" id="fullscreen-markdown-toggle" type="button" aria-label="Toggle Markdown preview" title="Toggle Markdown preview" aria-pressed="false">
             <svg class="eye-open-icon" aria-hidden="true" viewBox="0 0 24 24">

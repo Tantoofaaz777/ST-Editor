@@ -1,8 +1,6 @@
-import { countTokens } from "./vendor/tokenizer.js";
 import { renderMarkdown } from "./vendor/markdown.js";
 
 const storageKey = "st-editor.cards.v1";
-const tokenCountCache = new WeakMap();
 
 const fields = [
   "name",
@@ -65,7 +63,6 @@ const elements = {
   fullscreenEditorTitle: document.querySelector("#fullscreen-editor-title"),
   fullscreenMarkdownToggle: document.querySelector("#fullscreen-markdown-toggle"),
   fullscreenMarkdownPreview: document.querySelector("#fullscreen-markdown-preview"),
-  fullscreenTokenCount: document.querySelector("#fullscreen-token-count"),
   fullscreenEditorTextarea: document.querySelector("#fullscreen-editor-textarea"),
   fullscreenEditorClose: document.querySelector("#fullscreen-editor-close"),
   deleteConfirmModal: document.querySelector("#delete-confirm-modal"),
@@ -75,7 +72,6 @@ const elements = {
   title: document.querySelector("#screen-title"),
   toast: document.querySelector("#toast"),
   previewName: document.querySelector("#preview-name"),
-  previewTokenCount: document.querySelector("#preview-token-count"),
   previewTags: document.querySelector("#preview-tags"),
   previewDescription: document.querySelector("#preview-description"),
   portraitImage: document.querySelector("#portrait-image"),
@@ -91,7 +87,6 @@ class AuthRequiredError extends Error {}
 const sortFieldLabels = {
   name: "Name",
   updatedAt: "Date modified",
-  tokens: "Token count",
   createdAt: "Date created"
 };
 
@@ -329,22 +324,6 @@ async function loadCards() {
   state.activeId = state.cards[0]?.id || null;
 }
 
-function cardTokenCount(card) {
-  const source = [
-    card.data.name,
-    card.data.description,
-    card.data.personality,
-    card.data.scenario,
-    card.data.first_mes,
-    card.data.mes_example
-  ].join("\n");
-  const cached = tokenCountCache.get(card);
-  if (cached?.source === source) return cached.count;
-  const count = countTokens(source);
-  tokenCountCache.set(card, { source, count });
-  return count;
-}
-
 function cardDateValue(card, key) {
   return new Date(card[key] || card.updatedAt || card.createdAt || 0).getTime() || 0;
 }
@@ -563,10 +542,7 @@ function filteredCards() {
     let firstValue;
     let secondValue;
 
-    if (state.sortField === "tokens") {
-      firstValue = cardTokenCount(first);
-      secondValue = cardTokenCount(second);
-    } else if (state.sortField === "updatedAt" || state.sortField === "createdAt") {
+    if (state.sortField === "updatedAt" || state.sortField === "createdAt") {
       firstValue = cardDateValue(first, state.sortField);
       secondValue = cardDateValue(second, state.sortField);
     } else {
@@ -603,7 +579,6 @@ function renderLibrary() {
   for (const card of cards) {
     const libraryDescription =
       card.data.creator_notes?.trim() || card.data.description?.trim() || "No description yet.";
-    const tokenCount = cardTokenCount(card);
     const updatedDate = formatShortDate(card.updatedAt);
     const createdDate = formatShortDate(card.createdAt || card.updatedAt);
     const button = document.createElement("button");
@@ -623,7 +598,6 @@ function renderLibrary() {
       </div>
       <p>${escapeHtml(shorten(libraryDescription, 150))}</p>
       <div class="library-item__meta">
-        <span class="meta-pill token-meta">${escapeHtml(tokenLabel(tokenCount))}</span>
         <span class="meta-pill date-meta">Modified ${escapeHtml(updatedDate)}</span>
         <span class="meta-pill date-meta">Created ${escapeHtml(createdDate)}</span>
         ${(card.data.tags || []).slice(0, 4).map((tag) => `<span class="meta-pill">${escapeHtml(tag)}</span>`).join("")}
@@ -671,20 +645,10 @@ function updatePreview() {
   const formData = new FormData(elements.form);
   const data = Object.fromEntries(formData.entries());
   const tags = splitLinesOrCommas(data.tags);
-  const countedFields = [
-    data.name,
-    data.description,
-    data.personality,
-    data.scenario,
-    data.first_mes,
-    data.mes_example
-  ];
-  const tokenCount = countTokens(countedFields.join("\n"));
   const name = data.name?.trim() || "Untitled";
 
   elements.title.textContent = name;
   elements.previewName.textContent = name;
-  elements.previewTokenCount.textContent = tokenLabel(tokenCount);
   elements.portraitInitial.textContent = name.slice(0, 1).toUpperCase();
   elements.portraitImage.src = editorCard()?.imageThumbnailDataUrl || "";
   elements.portraitImage.hidden = !editorCard()?.imageThumbnailDataUrl;
@@ -701,8 +665,6 @@ function updatePreview() {
     pill.textContent = tag;
     elements.previewTags.append(pill);
   }
-
-  updateTextareaTokenCounters();
 }
 
 function readAlternateGreetingFields() {
@@ -774,59 +736,8 @@ function enhanceTextareas(root = document) {
     button.setAttribute("aria-label", `Open ${getTextareaLabel(textarea)} in fullscreen editor`);
     shell.append(button);
 
-    if (!textarea.dataset.noTokenCounter) {
-      const counter = document.createElement("span");
-      counter.className = "token-counter";
-      counter.setAttribute("aria-label", `Token count for ${getTextareaLabel(textarea)}`);
-      textarea.tokenCounter = counter;
-      placeTokenCounter(textarea, counter);
-    }
-
     textarea.dataset.enhancedEditor = "true";
-    updateTextareaTokenCounter(textarea);
   });
-}
-
-function placeTokenCounter(textarea, counter) {
-  const field = textarea.closest("label, .field-group, .alternate-field");
-  if (!field) return;
-
-  const header = field.querySelector(":scope > .field-header");
-  if (header) {
-    const action = header.querySelector(":scope > button, :scope > .alternate-actions");
-    if (action) {
-      header.insertBefore(counter, action);
-    } else {
-      header.append(counter);
-    }
-    return;
-  }
-
-  const label = field.querySelector(":scope > span");
-  if (!label) return;
-
-  const row = document.createElement("div");
-  row.className = "textarea-label-row";
-  label.parentNode.insertBefore(row, label);
-  row.append(label, counter);
-}
-
-function updateTextareaTokenCounters(root = elements.form) {
-  root.querySelectorAll("textarea").forEach(updateTextareaTokenCounter);
-}
-
-function updateTextareaTokenCounter(textarea) {
-  const counter = textarea.tokenCounter;
-  if (!counter) return;
-  counter.textContent = tokenLabel(countTokens(textarea.value));
-}
-
-function tokenLabel(count) {
-  return `${formatNumber(count)} ${count === 1 ? "token" : "tokens"}`;
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function formatShortDate(value) {
@@ -850,16 +761,9 @@ function openFullscreenEditor(textarea) {
   setMarkdownPreviewActive(false);
   elements.fullscreenEditorTitle.textContent = getTextareaLabel(textarea);
   elements.fullscreenEditorTextarea.value = textarea.value;
-  elements.fullscreenTokenCount.hidden = Boolean(textarea.dataset.noTokenCounter);
-  updateFullscreenTokenCount();
   elements.fullscreenEditor.hidden = false;
   document.body.classList.add("modal-open");
   elements.fullscreenEditorTextarea.focus();
-}
-
-function updateFullscreenTokenCount() {
-  if (elements.fullscreenTokenCount.hidden) return;
-  elements.fullscreenTokenCount.textContent = tokenLabel(countTokens(elements.fullscreenEditorTextarea.value));
 }
 
 function setMarkdownPreviewActive(isActive) {
@@ -1379,7 +1283,6 @@ elements.fullscreenMarkdownToggle.addEventListener("click", () => {
   setMarkdownPreviewActive(!isMarkdownPreviewActive);
 });
 elements.fullscreenEditorTextarea.addEventListener("input", () => {
-  updateFullscreenTokenCount();
   if (isMarkdownPreviewActive) setMarkdownPreviewActive(true);
 });
 elements.fullscreenEditor.addEventListener("keydown", (event) => {
