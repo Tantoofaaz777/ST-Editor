@@ -444,9 +444,9 @@ button {
 
 .library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 20rem));
-  gap: 1rem;
-  justify-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 1.15rem;
+  justify-content: stretch;
 }
 
 .library-grid.is-list-view {
@@ -458,15 +458,16 @@ button {
 .library-item {
   display: grid;
   align-content: start;
-  gap: 0.8rem;
-  min-height: 13rem;
-  padding: 1rem;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 1rem;
+  border-radius: 0.9rem;
   background: rgba(32, 32, 32, 0.8);
   box-shadow: var(--shadow);
   color: var(--text);
-  text-align: left;
+  text-align: center;
+  overflow: hidden;
 }
 
 .library-item:hover {
@@ -481,12 +482,35 @@ button {
   min-height: 0;
   padding: 0.75rem 0.9rem;
   border-radius: 0.8rem;
+  text-align: left;
+  overflow: visible;
+}
+
+.library-grid.is-list-view .library-item__top {
+  flex-direction: row;
+  gap: 0.75rem;
+}
+
+.library-grid.is-list-view .library-initial {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 0.5rem;
+  font-size: 1.25rem;
+}
+
+.library-grid.is-list-view .library-item h3 {
+  padding: 0;
+}
+
+.library-grid.is-list-view .library-item__top > div:last-child p {
+  display: block;
 }
 
 .library-item__top {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.55rem;
   min-width: 0;
 }
 
@@ -494,12 +518,12 @@ button {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 2.8rem;
-  height: 2.8rem;
-  border-radius: 0.5rem;
+  aspect-ratio: 1 / 1.18;
+  width: 100%;
+  border-radius: 0;
   background: linear-gradient(135deg, var(--accent), var(--warm));
   color: #101010;
-  font-size: 1.25rem;
+  font-size: clamp(2rem, 8vw, 4rem);
   font-weight: 950;
   overflow: hidden;
 }
@@ -511,14 +535,28 @@ button {
 }
 
 .library-item h3 {
+  max-width: 100%;
   overflow: hidden;
+  padding: 0 0.65rem 0.75rem;
+  font-size: 0.98rem;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .library-item p {
+  display: none;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.library-item__top > div:last-child {
+  min-width: 0;
+  width: 100%;
+}
+
+.library-item__top > div:last-child p {
+  display: none;
 }
 
 .library-grid.is-list-view .library-item > p {
@@ -531,6 +569,10 @@ button {
 }
 
 .library-item__meta {
+  display: none;
+}
+
+.library-grid.is-list-view .library-item__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
@@ -1545,6 +1587,15 @@ summary {
     width: 100%;
     max-width: 100%;
     margin-top: 0.45rem;
+  }
+
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+
+  .library-item h3 {
+    font-size: 0.9rem;
   }
 
   .library-grid.is-list-view .library-item {
