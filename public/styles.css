@@ -1542,6 +1542,14 @@ summary {
   .library-tabs {
     justify-self: stretch;
     justify-content: center;
+    gap: 0.18rem;
+    padding: 0.16rem;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .library-tabs button {
+    min-height: 2.6rem;
+    padding: 0 1.15rem;
   }
 
   .library-actions {
