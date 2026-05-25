@@ -145,7 +145,11 @@ function emptyCard() {
       extensions: {}
     },
     imageDataUrl: "",
-    imageThumbnailDataUrl: ""
+    imageThumbnailDataUrl: "",
+    imagePath: "",
+    thumbnailPath: "",
+    imageUrl: "",
+    thumbnailUrl: ""
   };
 }
 
@@ -240,6 +244,10 @@ function normalizeStoredCard(card) {
   const imageDataUrl = typeof card.imageDataUrl === "string" ? card.imageDataUrl : "";
   const imageThumbnailDataUrl =
     typeof card.imageThumbnailDataUrl === "string" ? card.imageThumbnailDataUrl : "";
+  const imagePath = typeof card.imagePath === "string" ? card.imagePath : "";
+  const thumbnailPath = typeof card.thumbnailPath === "string" ? card.thumbnailPath : "";
+  const imageUrl = typeof card.imageUrl === "string" ? card.imageUrl : "";
+  const thumbnailUrl = typeof card.thumbnailUrl === "string" ? card.thumbnailUrl : "";
   return {
     ...emptyCard(),
     ...card,
@@ -247,10 +255,14 @@ function normalizeStoredCard(card) {
     updatedAt: card.updatedAt || card.createdAt || new Date().toISOString(),
     imageDataUrl,
     imageThumbnailDataUrl,
-    hasImage: Boolean(imageDataUrl || imageThumbnailDataUrl || card.hasImage),
-    hasThumbnail: Boolean(imageThumbnailDataUrl || card.hasThumbnail),
-    imageLoaded: hasImageField || !card.hasImage,
-    thumbnailLoaded: hasThumbnailField || !card.hasImage,
+    imagePath,
+    thumbnailPath,
+    imageUrl,
+    thumbnailUrl,
+    hasImage: Boolean(imageDataUrl || imagePath || imageUrl || imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || card.hasImage),
+    hasThumbnail: Boolean(imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || card.hasThumbnail),
+    imageLoaded: hasImageField || Boolean(imagePath || imageUrl) || !card.hasImage,
+    thumbnailLoaded: hasThumbnailField || Boolean(thumbnailPath || thumbnailUrl) || !card.hasImage,
     data: {
       ...emptyCard().data,
       ...(card.data || {}),
@@ -270,8 +282,12 @@ function toStoredCard(card) {
   delete storedCard.hasThumbnail;
   delete storedCard.imageLoaded;
   delete storedCard.thumbnailLoaded;
+  delete storedCard.imageUrl;
+  delete storedCard.thumbnailUrl;
   if (!storedCard.imageDataUrl) delete storedCard.imageDataUrl;
   if (!storedCard.imageThumbnailDataUrl) delete storedCard.imageThumbnailDataUrl;
+  if (!storedCard.imagePath) delete storedCard.imagePath;
+  if (!storedCard.thumbnailPath) delete storedCard.thumbnailPath;
   return storedCard;
 }
 
@@ -417,6 +433,10 @@ function editorCard() {
   return state.draftCard || activeCard();
 }
 
+function cardThumbnailSource(card) {
+  return card?.imageThumbnailDataUrl || card?.thumbnailUrl || "";
+}
+
 async function loadFullCard(card) {
   if (!card || card.imageLoaded || !card.hasImage) return card;
   const response = await fetch(`/api/cards/${encodeURIComponent(card.id)}`);
@@ -432,11 +452,15 @@ async function loadFullCard(card) {
 
 async function loadFullImageForExport(card) {
   if (!card || card.imageDataUrl || !card.hasImage) return card;
-  return loadFullCard(card);
+  const fullCard = await loadFullCard(card);
+  if (fullCard.imageDataUrl || !fullCard.imageUrl) return fullCard;
+  fullCard.imageDataUrl = await urlToDataUrl(fullCard.imageUrl);
+  fullCard.imageLoaded = true;
+  return fullCard;
 }
 
 function needsThumbnailMigration(card) {
-  return Boolean(card?.hasImage && !card.imageThumbnailDataUrl);
+  return Boolean(card?.hasImage && !card.imageThumbnailDataUrl && !card.thumbnailUrl);
 }
 
 function queueThumbnailMigration() {
@@ -463,7 +487,7 @@ async function migrateThumbnails() {
     if (!needsThumbnailMigration(currentCard)) continue;
 
     try {
-      const fullCard = await loadFullCard(currentCard);
+      const fullCard = await loadFullImageForExport(currentCard);
       if (!fullCard?.imageDataUrl) continue;
       fullCard.imageThumbnailDataUrl = await createThumbnailDataUrl(fullCard.imageDataUrl);
       fullCard.hasImage = true;
@@ -644,8 +668,8 @@ function renderLibrary() {
     button.innerHTML = `
       <div class="library-item__top">
         <div class="library-initial">
-          ${card.imageThumbnailDataUrl
-            ? `<img src="${escapeHtml(card.imageThumbnailDataUrl)}" alt="" />`
+          ${cardThumbnailSource(card)
+            ? `<img src="${escapeHtml(cardThumbnailSource(card))}" alt="" />`
             : escapeHtml((card.data.name || "U").slice(0, 1).toUpperCase())}
         </div>
         <div>
@@ -707,8 +731,9 @@ function updatePreview() {
   elements.title.textContent = name;
   elements.previewName.textContent = name;
   elements.portraitInitial.textContent = name.slice(0, 1).toUpperCase();
-  elements.portraitImage.src = editorCard()?.imageThumbnailDataUrl || "";
-  elements.portraitImage.hidden = !editorCard()?.imageThumbnailDataUrl;
+  const portraitSource = cardThumbnailSource(editorCard());
+  elements.portraitImage.src = portraitSource;
+  elements.portraitImage.hidden = !portraitSource;
   const creatorNotes = data.creator_notes?.trim() || "";
   elements.previewDescription.textContent = creatorNotes;
   elements.previewDescription.hidden = !creatorNotes;
@@ -1089,6 +1114,16 @@ function fileToDataUrl(file) {
     reader.addEventListener("error", () => reject(reader.error));
     reader.readAsDataURL(file);
   });
+}
+
+async function urlToDataUrl(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    await redirectIfAuthRequired(response);
+    throw new Error(`Could not load image: ${response.status}`);
+  }
+  const blob = await response.blob();
+  return fileToDataUrl(blob);
 }
 
 async function imageDataUrlToPngBytes(dataUrl) {

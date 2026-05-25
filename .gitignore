@@ -3,6 +3,7 @@ node_modules/
 # Local app data
 data/cards.json
 data/*.tmp
+data/assets/
 
 # Local-only reference/test files
 screenshots/

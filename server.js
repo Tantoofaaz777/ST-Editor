@@ -9,6 +9,7 @@ loadDotEnv();
 const port = Number(process.env.PORT || 4173);
 const publicDir = path.join(__dirname, "public");
 const dataDir = path.join(__dirname, "data");
+const assetsDir = path.join(dataDir, "assets");
 const cardsFile = path.join(dataDir, "cards.json");
 const authUser = process.env.ST_EDITOR_USER || "";
 const authPassword = process.env.ST_EDITOR_PASSWORD || "";
@@ -66,6 +67,14 @@ function sendWithHeaders(response, status, body, contentType, headers) {
     "Content-Type": contentType,
     "Cache-Control": "no-store",
     ...headers
+  });
+  response.end(body);
+}
+
+function sendAsset(response, status, body, contentType) {
+  response.writeHead(status, {
+    "Content-Type": contentType,
+    "Cache-Control": "private, max-age=31536000, immutable"
   });
   response.end(body);
 }
@@ -302,77 +311,283 @@ function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+  if (!match) return null;
+  const mimeType = match[1] || "application/octet-stream";
+  const isBase64 = Boolean(match[2]);
+  const payload = match[3] || "";
+  try {
+    return {
+      mimeType,
+      bytes: isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload))
+    };
+  } catch {
+    return null;
+  }
+}
+
+function imageExtension(mimeType) {
+  if (mimeType === "image/jpeg") return ".jpg";
+  if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "image/gif") return ".gif";
+  if (mimeType === "image/png") return ".png";
+  return ".bin";
+}
+
+function safeAssetId(value) {
+  return String(value || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 96);
+}
+
+function assetUrl(cardId, kind, updatedAt) {
+  const version = encodeURIComponent(updatedAt || "");
+  return `/api/cards/${encodeURIComponent(cardId)}/${kind}${version ? `?v=${version}` : ""}`;
+}
+
+function writeDataUrlAsset(card, field, pathField, kind, callback) {
+  const parsed = parseDataUrl(card[field]);
+  if (!parsed) {
+    callback(null, false);
+    return;
+  }
+
+  fs.mkdir(assetsDir, { recursive: true }, (mkdirError) => {
+    if (mkdirError) {
+      callback(mkdirError);
+      return;
+    }
+
+    const hash = crypto.createHash("sha256").update(parsed.bytes).digest("hex").slice(0, 16);
+    const filename = `${safeAssetId(card.id)}-${kind}-${hash}${imageExtension(parsed.mimeType)}`;
+    const relativePath = path.join("assets", filename);
+    const targetPath = path.join(dataDir, relativePath);
+    fs.writeFile(targetPath, parsed.bytes, (writeError) => {
+      if (writeError) {
+        callback(writeError);
+        return;
+      }
+      card[pathField] = relativePath.replace(/\\/g, "/");
+      delete card[field];
+      callback(null, true);
+    });
+  });
+}
+
+function extractCardAssets(card, callback) {
+  if (!isRecord(card)) {
+    callback(null, false);
+    return;
+  }
+
+  writeDataUrlAsset(card, "imageDataUrl", "imagePath", "image", (imageError, imageChanged) => {
+    if (imageError) {
+      callback(imageError);
+      return;
+    }
+    writeDataUrlAsset(
+      card,
+      "imageThumbnailDataUrl",
+      "thumbnailPath",
+      "thumbnail",
+      (thumbnailError, thumbnailChanged) => {
+        if (thumbnailError) {
+          callback(thumbnailError);
+          return;
+        }
+        callback(null, Boolean(imageChanged || thumbnailChanged));
+      }
+    );
+  });
+}
+
+function extractAssets(cards, callback) {
+  const normalizedCards = cards.map((card) => (isRecord(card) ? { ...card } : card));
+  let index = 0;
+  let changed = false;
+
+  function next(error) {
+    if (error) {
+      callback(error);
+      return;
+    }
+    if (index >= normalizedCards.length) {
+      callback(null, normalizedCards, changed);
+      return;
+    }
+    extractCardAssets(normalizedCards[index], (assetError, cardChanged) => {
+      changed = changed || cardChanged;
+      index += 1;
+      next(assetError);
+    });
+  }
+
+  next();
+}
+
+function writeCards(cards, callback) {
+  fs.mkdir(dataDir, { recursive: true }, (mkdirError) => {
+    if (mkdirError) {
+      callback(mkdirError);
+      return;
+    }
+
+    const tempFile = `${cardsFile}.tmp`;
+    fs.writeFile(tempFile, JSON.stringify(cards, null, 2), "utf8", (writeError) => {
+      if (writeError) {
+        callback(writeError);
+        return;
+      }
+      fs.rename(tempFile, cardsFile, callback);
+    });
+  });
+}
+
+function readMigratedCards(callback) {
+  readCards((readError, cards = []) => {
+    if (readError) {
+      callback(readError);
+      return;
+    }
+    extractAssets(cards, (assetError, migratedCards, changed) => {
+      if (assetError) {
+        callback(assetError);
+        return;
+      }
+      if (!changed) {
+        callback(null, migratedCards);
+        return;
+      }
+      writeCards(migratedCards, (writeError) => {
+        if (writeError) {
+          callback(writeError);
+          return;
+        }
+        callback(null, migratedCards);
+      });
+    });
+  });
+}
+
 function lightCard(card) {
-  const { imageDataUrl, ...summary } = card;
+  if (!isRecord(card)) return {};
+  const { imageDataUrl, imageThumbnailDataUrl, imagePath, thumbnailPath, ...summary } = card;
+  const hasImage = Boolean(imageDataUrl || card.imagePath || imageThumbnailDataUrl || card.thumbnailPath);
+  const hasThumbnail = Boolean(imageThumbnailDataUrl || card.thumbnailPath);
   return {
     ...summary,
-    hasImage: Boolean(imageDataUrl || card.imageThumbnailDataUrl),
-    hasThumbnail: Boolean(card.imageThumbnailDataUrl)
+    hasImage,
+    hasThumbnail,
+    imageUrl: hasImage ? assetUrl(card.id, "image", card.updatedAt) : "",
+    thumbnailUrl: hasThumbnail ? assetUrl(card.id, "thumbnail", card.updatedAt) : ""
   };
 }
 
 function mergeStoredImages(cards, callback) {
-  readCards((error, storedCards = []) => {
+  readMigratedCards((error, storedCards = []) => {
     if (error) {
       callback(cards);
       return;
     }
     const storedImages = new Map(
       storedCards
-        .filter((card) => card && card.id && card.imageDataUrl)
-        .map((card) => [card.id, card.imageDataUrl])
+        .filter((card) => card && card.id && card.imagePath)
+        .map((card) => [card.id, card.imagePath])
     );
     const storedThumbnails = new Map(
       storedCards
-        .filter((card) => card && card.id && card.imageThumbnailDataUrl)
-        .map((card) => [card.id, card.imageThumbnailDataUrl])
+        .filter((card) => card && card.id && card.thumbnailPath)
+        .map((card) => [card.id, card.thumbnailPath])
     );
     callback(
       cards.map((card) => {
         if (!isRecord(card)) return card;
         return {
           ...card,
-          imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || "",
-          imageThumbnailDataUrl:
-            card.imageThumbnailDataUrl || storedThumbnails.get(card.id) || ""
+          imagePath: card.imagePath || storedImages.get(card.id) || "",
+          thumbnailPath: card.thumbnailPath || storedThumbnails.get(card.id) || ""
         };
       })
     );
   });
 }
 
+function safeAssetPath(relativePath) {
+  if (!relativePath) return "";
+  const normalized = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, "").replace(/^[/\\]/, "");
+  const filePath = path.join(dataDir, normalized);
+  const relativeToAssets = path.relative(assetsDir, filePath);
+  if (relativeToAssets.startsWith("..") || path.isAbsolute(relativeToAssets)) return "";
+  return filePath;
+}
+
+function sendCardAsset(request, response, cardId, kind) {
+  readMigratedCards((error, cards = []) => {
+    if (error) {
+      sendJson(request, response, 500, { error: "Could not read cards" });
+      return;
+    }
+    const card = cards.find((item) => isRecord(item) && item.id === cardId);
+    if (!card) {
+      sendJson(request, response, 404, { error: "Card not found" });
+      return;
+    }
+
+    const relativePath = kind === "thumbnail" ? card.thumbnailPath : card.imagePath;
+    const filePath = safeAssetPath(relativePath);
+    if (!filePath) {
+      sendJson(request, response, 404, { error: "Image not found" });
+      return;
+    }
+
+    fs.readFile(filePath, (readError, data) => {
+      if (readError) {
+        sendJson(request, response, 404, { error: "Image not found" });
+        return;
+      }
+      const extension = path.extname(filePath).toLowerCase();
+      sendAsset(response, 200, data, mimeTypes[extension] || "application/octet-stream");
+    });
+  });
+}
+
 function handleCardsApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/cards/summary") {
-    readCards((error, cards = []) => {
+    readMigratedCards((error, cards = []) => {
       if (error) {
         sendJson(request, response, 500, { error: "Could not read cards" });
         return;
       }
-      sendJson(request, response, 200, cards.map(lightCard));
+      sendJson(request, response, 200, cards.filter(isRecord).map(lightCard));
     });
+    return;
+  }
+
+  const assetMatch = url.pathname.match(/^\/api\/cards\/([^/]+)\/(thumbnail|image)$/);
+  if (request.method === "GET" && assetMatch) {
+    sendCardAsset(request, response, decodeURIComponent(assetMatch[1]), assetMatch[2]);
     return;
   }
 
   const singleCardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
   if (request.method === "GET" && singleCardMatch) {
     const cardId = decodeURIComponent(singleCardMatch[1]);
-    readCards((error, cards = []) => {
+    readMigratedCards((error, cards = []) => {
       if (error) {
         sendJson(request, response, 500, { error: "Could not read cards" });
         return;
       }
-      const card = cards.find((item) => item.id === cardId);
+      const card = cards.find((item) => isRecord(item) && item.id === cardId);
       if (!card) {
         sendJson(request, response, 404, { error: "Card not found" });
         return;
       }
-      sendJson(request, response, 200, card);
+      sendJson(request, response, 200, lightCard(card));
     });
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/cards") {
-    readCards((error, cards = []) => {
+    readMigratedCards((error, cards = []) => {
       if (error) {
         sendJson(request, response, 500, { error: "Could not read cards" });
         return;
@@ -400,26 +615,18 @@ function handleCardsApi(request, response, url) {
         return;
       }
 
-      fs.mkdir(dataDir, { recursive: true }, (mkdirError) => {
-        if (mkdirError) {
-          sendJson(request, response, 500, { error: "Could not create data folder" });
-          return;
-        }
-
-        const tempFile = `${cardsFile}.tmp`;
-        mergeStoredImages(cards, (cardsToSave) => {
-          fs.writeFile(tempFile, JSON.stringify(cardsToSave, null, 2), "utf8", (writeError) => {
+      mergeStoredImages(cards, (cardsToMerge) => {
+        extractAssets(cardsToMerge, (assetError, cardsToSave) => {
+          if (assetError) {
+            sendJson(request, response, 500, { error: "Could not save images" });
+            return;
+          }
+          writeCards(cardsToSave, (writeError) => {
             if (writeError) {
               sendJson(request, response, 500, { error: "Could not save cards" });
               return;
             }
-            fs.rename(tempFile, cardsFile, (renameError) => {
-              if (renameError) {
-                sendJson(request, response, 500, { error: "Could not finish saving cards" });
-                return;
-              }
-              sendJson(request, response, 200, { ok: true });
-            });
+            sendJson(request, response, 200, { ok: true });
           });
         });
       });
