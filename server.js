@@ -298,6 +298,10 @@ function readCards(callback) {
   });
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function lightCard(card) {
   const { imageDataUrl, ...summary } = card;
   return {
@@ -324,12 +328,15 @@ function mergeStoredImages(cards, callback) {
         .map((card) => [card.id, card.imageThumbnailDataUrl])
     );
     callback(
-      cards.map((card) => ({
-        ...card,
-        imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || "",
-        imageThumbnailDataUrl:
-          card.imageThumbnailDataUrl || storedThumbnails.get(card.id) || ""
-      }))
+      cards.map((card) => {
+        if (!isRecord(card)) return card;
+        return {
+          ...card,
+          imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || "",
+          imageThumbnailDataUrl:
+            card.imageThumbnailDataUrl || storedThumbnails.get(card.id) || ""
+        };
+      })
     );
   });
 }
@@ -386,6 +393,10 @@ function handleCardsApi(request, response, url) {
       }
       if (!Array.isArray(cards)) {
         sendJson(request, response, 400, { error: "Cards payload must be an array" });
+        return;
+      }
+      if (!cards.every(isRecord)) {
+        sendJson(request, response, 400, { error: "Cards payload entries must be objects" });
         return;
       }
 
