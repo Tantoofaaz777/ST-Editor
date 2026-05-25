@@ -28,7 +28,8 @@ const state = {
   sortField: "name",
   sortDirection: "asc",
   viewMode: "grid",
-  view: "library"
+  view: "library",
+  libraryScrollY: 0
 };
 
 const elements = {
@@ -836,17 +837,21 @@ function showLibrary() {
   elements.libraryView.classList.remove("is-hidden");
   elements.editorView.classList.add("is-hidden");
   renderLibrary();
+  requestAnimationFrame(() => window.scrollTo(0, state.libraryScrollY));
 }
 
 async function showEditor() {
+  if (state.view === "library") state.libraryScrollY = window.scrollY;
   state.view = "editor";
   elements.libraryView.classList.add("is-hidden");
   elements.editorView.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
   const card = activeCard();
   state.draftCard = card ? cloneCard(card) : null;
   if (state.draftCard) writeForm(state.draftCard);
   setSaveStatus(false);
   enhanceTextareas(elements.form);
+  requestAnimationFrame(() => window.scrollTo(0, 0));
 }
 
 function saveActiveCard() {
