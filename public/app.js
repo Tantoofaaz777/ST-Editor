@@ -24,6 +24,7 @@ const state = {
   activeId: null,
   draftCard: null,
   isDirty: false,
+  isMigratingThumbnails: false,
   search: "",
   selectedTags: new Set(),
   sortField: "name",
@@ -400,6 +401,65 @@ async function loadFullCard(card) {
 async function loadFullImageForExport(card) {
   if (!card || card.imageDataUrl || !card.hasImage) return card;
   return loadFullCard(card);
+}
+
+function needsThumbnailMigration(card) {
+  return Boolean(card?.hasImage && !card.imageThumbnailDataUrl);
+}
+
+function queueThumbnailMigration() {
+  const missingCount = state.cards.filter(needsThumbnailMigration).length;
+  if (!missingCount || state.isMigratingThumbnails) return;
+  const schedule = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 250));
+  schedule(() => migrateThumbnails());
+}
+
+async function migrateThumbnails() {
+  if (state.isMigratingThumbnails) return;
+  state.isMigratingThumbnails = true;
+  const missing = state.cards.filter(needsThumbnailMigration);
+  if (!missing.length) {
+    state.isMigratingThumbnails = false;
+    return;
+  }
+
+  showToast(`Creating ${missing.length} image thumbnails...`);
+  let migratedCount = 0;
+
+  for (const summaryCard of missing) {
+    const currentCard = state.cards.find((card) => card.id === summaryCard.id);
+    if (!needsThumbnailMigration(currentCard)) continue;
+
+    try {
+      const fullCard = await loadFullCard(currentCard);
+      if (!fullCard?.imageDataUrl) continue;
+      fullCard.imageThumbnailDataUrl = await createThumbnailDataUrl(fullCard.imageDataUrl);
+      fullCard.hasImage = true;
+      fullCard.hasThumbnail = true;
+      fullCard.thumbnailLoaded = true;
+      fullCard.imageDataUrl = "";
+      fullCard.imageLoaded = false;
+
+      if (state.draftCard?.id === fullCard.id && !state.isDirty) {
+        state.draftCard = cloneCard(fullCard);
+        if (isEditorVisible()) writeForm(state.draftCard);
+      }
+
+      renderLibrary();
+      await persistCards();
+      migratedCount += 1;
+      await wait(80);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        redirectToLogin();
+        return;
+      }
+      console.error(error);
+    }
+  }
+
+  state.isMigratingThumbnails = false;
+  if (migratedCount) showToast(`Created ${migratedCount} image thumbnails.`);
 }
 
 function syncDraftToLibrary() {
@@ -1259,6 +1319,10 @@ function shorten(value, maxLength) {
   return `${text.slice(0, maxLength - 1).trim()}...`;
 }
 
+function wait(duration) {
+  return new Promise((resolve) => window.setTimeout(resolve, duration));
+}
+
 function showToast(message) {
   elements.toast.textContent = message;
   elements.toast.classList.add("visible");
@@ -1443,3 +1507,4 @@ elements.importInput.addEventListener("change", async (event) => {
 await loadCards();
 enhanceTextareas(elements.form);
 showLibrary();
+queueThumbnailMigration();
