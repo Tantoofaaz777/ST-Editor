@@ -295,7 +295,8 @@ function lightCard(card) {
   const { imageDataUrl, ...summary } = card;
   return {
     ...summary,
-    hasImage: Boolean(imageDataUrl)
+    hasImage: Boolean(imageDataUrl || card.imageThumbnailDataUrl),
+    hasThumbnail: Boolean(card.imageThumbnailDataUrl)
   };
 }
 
@@ -310,10 +311,17 @@ function mergeStoredImages(cards, callback) {
         .filter((card) => card && card.id && card.imageDataUrl)
         .map((card) => [card.id, card.imageDataUrl])
     );
+    const storedThumbnails = new Map(
+      storedCards
+        .filter((card) => card && card.id && card.imageThumbnailDataUrl)
+        .map((card) => [card.id, card.imageThumbnailDataUrl])
+    );
     callback(
       cards.map((card) => ({
         ...card,
-        imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || ""
+        imageDataUrl: card.imageDataUrl || storedImages.get(card.id) || "",
+        imageThumbnailDataUrl:
+          card.imageThumbnailDataUrl || storedThumbnails.get(card.id) || ""
       }))
     );
   });

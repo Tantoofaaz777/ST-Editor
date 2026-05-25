@@ -146,7 +146,8 @@ function emptyCard() {
       character_version: "1.0",
       extensions: {}
     },
-    imageDataUrl: ""
+    imageDataUrl: "",
+    imageThumbnailDataUrl: ""
   };
 }
 
@@ -237,15 +238,21 @@ function splitLinesOrCommas(value) {
 
 function normalizeStoredCard(card) {
   const hasImageField = Object.prototype.hasOwnProperty.call(card, "imageDataUrl");
+  const hasThumbnailField = Object.prototype.hasOwnProperty.call(card, "imageThumbnailDataUrl");
   const imageDataUrl = typeof card.imageDataUrl === "string" ? card.imageDataUrl : "";
+  const imageThumbnailDataUrl =
+    typeof card.imageThumbnailDataUrl === "string" ? card.imageThumbnailDataUrl : "";
   return {
     ...emptyCard(),
     ...card,
     createdAt: card.createdAt || card.updatedAt || new Date().toISOString(),
     updatedAt: card.updatedAt || card.createdAt || new Date().toISOString(),
     imageDataUrl,
-    hasImage: Boolean(imageDataUrl || card.hasImage),
+    imageThumbnailDataUrl,
+    hasImage: Boolean(imageDataUrl || imageThumbnailDataUrl || card.hasImage),
+    hasThumbnail: Boolean(imageThumbnailDataUrl || card.hasThumbnail),
     imageLoaded: hasImageField || !card.hasImage,
+    thumbnailLoaded: hasThumbnailField || !card.hasImage,
     data: {
       ...emptyCard().data,
       ...(card.data || {}),
@@ -388,6 +395,11 @@ async function loadFullCard(card) {
   const index = state.cards.findIndex((item) => item.id === fullCard.id);
   if (index !== -1) state.cards[index] = fullCard;
   return fullCard;
+}
+
+async function loadFullImageForExport(card) {
+  if (!card || card.imageDataUrl || !card.hasImage) return card;
+  return loadFullCard(card);
 }
 
 function syncDraftToLibrary() {
@@ -540,8 +552,8 @@ function renderLibrary() {
     button.innerHTML = `
       <div class="library-item__top">
         <div class="library-initial">
-          ${card.imageDataUrl
-            ? `<img src="${escapeHtml(card.imageDataUrl)}" alt="" />`
+          ${card.imageThumbnailDataUrl
+            ? `<img src="${escapeHtml(card.imageThumbnailDataUrl)}" alt="" />`
             : escapeHtml((card.data.name || "U").slice(0, 1).toUpperCase())}
         </div>
         <div>
@@ -614,8 +626,8 @@ function updatePreview() {
   elements.previewName.textContent = name;
   elements.previewTokenCount.textContent = tokenLabel(tokenCount);
   elements.portraitInitial.textContent = name.slice(0, 1).toUpperCase();
-  elements.portraitImage.src = editorCard()?.imageDataUrl || "";
-  elements.portraitImage.hidden = !editorCard()?.imageDataUrl;
+  elements.portraitImage.src = editorCard()?.imageThumbnailDataUrl || "";
+  elements.portraitImage.hidden = !editorCard()?.imageThumbnailDataUrl;
   const creatorNotes = data.creator_notes?.trim() || "";
   elements.previewDescription.textContent = creatorNotes;
   elements.previewDescription.hidden = !creatorNotes;
@@ -862,17 +874,7 @@ async function showEditor() {
   state.view = "editor";
   elements.libraryView.classList.add("is-hidden");
   elements.editorView.classList.remove("is-hidden");
-  let card = activeCard();
-  try {
-    card = await loadFullCard(card);
-  } catch (error) {
-    if (error instanceof AuthRequiredError) {
-      redirectToLogin();
-      return;
-    }
-    console.error(error);
-    showToast("Could not load this card image.");
-  }
+  const card = activeCard();
   state.draftCard = card ? cloneCard(card) : null;
   if (state.draftCard) writeForm(state.draftCard);
   setSaveStatus(false);
@@ -960,7 +962,24 @@ function exportActiveCard() {
 
 async function exportActiveCardPng() {
   readForm();
-  const card = editorCard();
+  let card = editorCard();
+  try {
+    card = await loadFullImageForExport(card);
+    if (state.draftCard && card !== state.draftCard) {
+      state.draftCard.imageDataUrl = card.imageDataUrl || "";
+      state.draftCard.imageLoaded = card.imageLoaded;
+      card = state.draftCard;
+    }
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      localStorage.setItem(storageKey, JSON.stringify(state.cards.map(toStoredCard)));
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load the full image for export.");
+    return;
+  }
   const basePng = card.imageDataUrl
     ? await imageDataUrlToPngBytes(card.imageDataUrl)
     : await generateFallbackPortraitPng(card.data.name || "Character");
@@ -984,8 +1003,11 @@ async function importCard(file) {
     const json = readCardJsonFromPng(bytes);
     const card = normalizeImportedCard(json);
     card.imageDataUrl = await fileToDataUrl(file);
+    card.imageThumbnailDataUrl = await createThumbnailDataUrl(card.imageDataUrl);
     card.hasImage = true;
+    card.hasThumbnail = true;
     card.imageLoaded = true;
+    card.thumbnailLoaded = true;
     state.cards.unshift(card);
     state.activeId = card.id;
     persistCards();
@@ -1009,8 +1031,11 @@ async function setCardImage(file) {
   const card = editorCard();
   if (!card) return;
   card.imageDataUrl = await fileToDataUrl(file);
+  card.imageThumbnailDataUrl = await createThumbnailDataUrl(card.imageDataUrl);
   card.hasImage = true;
+  card.hasThumbnail = true;
   card.imageLoaded = true;
+  card.thumbnailLoaded = true;
   setSaveStatus(true);
   updatePreview();
 }
@@ -1034,6 +1059,19 @@ async function imageDataUrlToPngBytes(dataUrl) {
   const context = canvas.getContext("2d");
   context.drawImage(image, 0, 0);
   return dataUrlToBytes(canvas.toDataURL("image/png"));
+}
+
+async function createThumbnailDataUrl(dataUrl, maxSize = 384) {
+  const image = await loadImage(dataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/webp", 0.72);
 }
 
 async function generateFallbackPortraitPng(name) {
