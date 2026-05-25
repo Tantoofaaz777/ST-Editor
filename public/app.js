@@ -843,7 +843,7 @@ function renderLibrary() {
   elements.emptyState.hidden = items.length > 0;
   elements.libraryGrid.classList.toggle("is-list-view", state.viewMode === "list");
   elements.filterMenu.hidden = isPersonas;
-  elements.importInput.closest(".file-button").hidden = isPersonas;
+  elements.importInput.closest(".file-button").style.display = isPersonas ? "none" : "";
   elements.newButton.textContent = isPersonas ? "New persona" : "New character";
   elements.search.placeholder = isPersonas ? "Name, description..." : "Name, tag, creator...";
   elements.charactersTab.classList.toggle("active", !isPersonas);
@@ -913,8 +913,6 @@ function renderCharacterLibraryItem(card) {
 }
 
 function renderPersonaLibraryItem(persona) {
-  const updatedDate = formatShortDate(persona.updatedAt);
-  const createdDate = formatShortDate(persona.createdAt || persona.updatedAt);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "library-item";
@@ -930,10 +928,6 @@ function renderPersonaLibraryItem(persona) {
       </div>
     </div>
     <p>${escapeHtml(shorten(persona.description || "No description yet.", 150))}</p>
-    <div class="library-item__meta">
-      <span class="meta-pill date-meta">Modified ${escapeHtml(updatedDate)}</span>
-      <span class="meta-pill date-meta">Created ${escapeHtml(createdDate)}</span>
-    </div>
   `;
   button.addEventListener("click", () => {
     state.activePersonaId = persona.id;
@@ -1425,12 +1419,22 @@ async function copyActivePersonaDescription() {
   readPersonaForm();
   const persona = editorPersona();
   if (!persona) return;
+  const text = persona.description || "";
   try {
-    await navigator.clipboard.writeText(persona.description || "");
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      copyTextFallback(text);
+    }
     showToast("Persona description copied.");
   } catch (error) {
-    console.error(error);
-    showToast("Could not copy the persona description.");
+    try {
+      copyTextFallback(text);
+      showToast("Persona description copied.");
+    } catch (fallbackError) {
+      console.error(error, fallbackError);
+      showToast("Could not copy the persona description.");
+    }
   }
 }
 
@@ -1603,6 +1607,21 @@ function dataUrlToBytes(dataUrl) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   return bytes;
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.append(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Copy command failed");
 }
 
 function encodeBase64Utf8(value) {
