@@ -117,7 +117,12 @@
         <main class="workspace">
           <header class="topbar">
             <div class="title-stack">
-              <button class="back-button" id="persona-back-button" type="button">← Library</button>
+              <button class="back-button" id="persona-back-button" type="button" aria-label="Back to library">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M15 6l-6 6 6 6" />
+                </svg>
+                <span>Library</span>
+              </button>
               <span class="save-status-pill" id="persona-save-status-pill">Saved</span>
               <h2 class="sr-only" id="persona-screen-title">New persona</h2>
             </div>
@@ -194,7 +199,12 @@
         <main class="workspace">
           <header class="topbar">
             <div class="title-stack">
-              <button class="back-button" id="back-button" type="button">← Library</button>
+              <button class="back-button" id="back-button" type="button" aria-label="Back to library">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M15 6l-6 6 6 6" />
+                </svg>
+                <span>Library</span>
+              </button>
               <span class="save-status-pill" id="save-status-pill">Saved</span>
               <h2 class="sr-only" id="screen-title">New character card</h2>
             </div>
@@ -355,7 +365,11 @@
 
     <div class="fullscreen-editor" id="fullscreen-editor" hidden>
       <div class="fullscreen-editor__bar">
-        <button class="fullscreen-back-button" id="fullscreen-editor-back" type="button" aria-label="Close editor">←</button>
+        <button class="fullscreen-back-button" id="fullscreen-editor-back" type="button" aria-label="Close editor">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </button>
         <h2 id="fullscreen-editor-title">Editor</h2>
         <div class="fullscreen-actions">
           <button class="ghost fullscreen-markdown-toggle icon-action" id="fullscreen-markdown-toggle" type="button" aria-label="Toggle Markdown preview" title="Toggle Markdown preview" aria-pressed="false">

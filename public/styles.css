@@ -1049,12 +1049,30 @@ textarea:focus {
 }
 
 .back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   flex: 0 0 auto;
   min-height: 2rem;
   padding: 0;
   background: transparent;
   color: var(--accent-strong);
   font-weight: 850;
+}
+
+.back-button svg,
+.fullscreen-back-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.35;
+}
+
+.back-button:hover {
+  color: var(--text);
 }
 
 .save-status-pill {
@@ -1365,9 +1383,6 @@ summary {
   border-radius: 999px;
   background: transparent;
   color: var(--accent-strong);
-  font-size: 1.1rem;
-  font-weight: 900;
-  line-height: 1;
 }
 
 .fullscreen-back-button:hover {
