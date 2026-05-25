@@ -581,6 +581,10 @@ function renderLibrary() {
       card.data.creator_notes?.trim() || card.data.description?.trim() || "No description yet.";
     const updatedDate = formatShortDate(card.updatedAt);
     const createdDate = formatShortDate(card.createdAt || card.updatedAt);
+    const subtitle = [card.data.creator, card.data.character_version]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(" - ");
     const button = document.createElement("button");
     button.type = "button";
     button.className = "library-item";
@@ -593,7 +597,7 @@ function renderLibrary() {
         </div>
         <div>
           <h3>${escapeHtml(card.data.name || "Untitled")}</h3>
-          <p>${escapeHtml([card.data.creator, card.data.character_version].filter(Boolean).join(" - ") || "JSON V2")}</p>
+          ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
         </div>
       </div>
       <p>${escapeHtml(shorten(libraryDescription, 150))}</p>
