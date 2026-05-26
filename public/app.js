@@ -89,6 +89,8 @@ const elements = {
   fullscreenEditorTextarea: document.querySelector("#fullscreen-editor-textarea"),
   fullscreenEditorClose: document.querySelector("#fullscreen-editor-close"),
   deleteConfirmModal: document.querySelector("#delete-confirm-modal"),
+  deleteConfirmEyebrow: document.querySelector("#delete-confirm-eyebrow"),
+  deleteConfirmTitle: document.querySelector("#delete-confirm-title"),
   deleteConfirmMessage: document.querySelector("#delete-confirm-message"),
   deleteConfirmCancel: document.querySelector("#delete-confirm-cancel"),
   deleteConfirmSubmit: document.querySelector("#delete-confirm-submit"),
@@ -118,6 +120,7 @@ const elements = {
 let activeFullscreenTextarea = null;
 let isMarkdownPreviewActive = false;
 let pendingDeleteId = null;
+let pendingConfirmAction = null;
 
 class AuthRequiredError extends Error {}
 
@@ -1128,6 +1131,29 @@ function setPersonaSaveStatus(isDirty) {
   elements.personaSaveStatus.classList.toggle("is-dirty", isDirty);
 }
 
+function hasUnsavedEditorChanges() {
+  return (state.view === "editor" && state.isDirty) || (state.view === "persona-editor" && state.isPersonaDirty);
+}
+
+function requestDiscardUnsavedChanges(action) {
+  if (!hasUnsavedEditorChanges()) {
+    action();
+    return;
+  }
+
+  openConfirmModal({
+    eyebrow: "Unsaved changes",
+    title: "Leave without saving?",
+    message: "Your current edits have not been saved. If you leave now, those changes will be discarded.",
+    submitLabel: "Discard changes",
+    submitDanger: true,
+    onConfirm: () => {
+      closeConfirmModal();
+      action();
+    }
+  });
+}
+
 function readAlternateGreetingFields() {
   return [...elements.alternateGreetingsList.querySelectorAll(".alternate-greeting")]
     .map((input) => input.value.trim())
@@ -1410,16 +1436,47 @@ function requestDeleteCard() {
   const current = isPersona ? activePersona() : activeCard();
   if (!current) return;
   pendingDeleteId = current.id;
-  elements.deleteConfirmMessage.textContent = `Delete "${isPersona ? current.name || "Untitled persona" : current.data.name || "Untitled"}"? This action cannot be undone.`;
+  openConfirmModal({
+    eyebrow: "Delete item",
+    title: "Delete this item?",
+    message: `Delete "${isPersona ? current.name || "Untitled persona" : current.data.name || "Untitled"}"? This action cannot be undone.`,
+    submitLabel: "Delete",
+    submitDanger: true,
+    onConfirm: confirmDeleteCard
+  });
+}
+
+function openConfirmModal({
+  eyebrow,
+  title,
+  message,
+  cancelLabel = "Cancel",
+  submitLabel,
+  submitDanger = false,
+  onConfirm
+}) {
+  pendingConfirmAction = onConfirm;
+  elements.deleteConfirmEyebrow.textContent = eyebrow;
+  elements.deleteConfirmTitle.textContent = title;
+  elements.deleteConfirmMessage.textContent = message;
+  elements.deleteConfirmCancel.textContent = cancelLabel;
+  elements.deleteConfirmSubmit.textContent = submitLabel;
+  elements.deleteConfirmSubmit.classList.toggle("danger", submitDanger);
   elements.deleteConfirmModal.hidden = false;
   document.body.classList.add("modal-open");
   elements.deleteConfirmCancel.focus();
 }
 
-function closeDeleteConfirm() {
+function closeConfirmModal() {
   pendingDeleteId = null;
+  pendingConfirmAction = null;
   elements.deleteConfirmModal.hidden = true;
   document.body.classList.remove("modal-open");
+}
+
+function submitConfirmModal() {
+  const action = pendingConfirmAction;
+  if (action) action();
 }
 
 function confirmDeleteCard() {
@@ -1428,7 +1485,7 @@ function confirmDeleteCard() {
     ? state.personas.find((persona) => persona.id === pendingDeleteId)
     : state.cards.find((card) => card.id === pendingDeleteId);
   if (!current) {
-    closeDeleteConfirm();
+    closeConfirmModal();
     return;
   }
 
@@ -1441,7 +1498,7 @@ function confirmDeleteCard() {
     state.activeId = state.cards[0]?.id || null;
     persistCards();
   }
-  closeDeleteConfirm();
+  closeConfirmModal();
   showLibrary();
   showToast(isPersona ? "Persona deleted." : "Card deleted.");
 }
@@ -2037,8 +2094,8 @@ document.addEventListener("click", (event) => {
   }
 });
 elements.newButton.addEventListener("click", createCard);
-elements.backButton.addEventListener("click", showLibrary);
-elements.personaBackButton.addEventListener("click", showLibrary);
+elements.backButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
+elements.personaBackButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
 elements.saveButton.addEventListener("click", saveActiveCard);
 elements.personaSaveButton.addEventListener("click", saveActivePersona);
 elements.personaCopyButton.addEventListener("click", copyActivePersonaDescription);
@@ -2048,13 +2105,18 @@ elements.exportPngButton.addEventListener("click", exportActiveCardPng);
 elements.duplicateButton.addEventListener("click", duplicateCard);
 elements.deleteButton.addEventListener("click", requestDeleteCard);
 elements.personaDeleteButton.addEventListener("click", requestDeleteCard);
-elements.deleteConfirmCancel.addEventListener("click", closeDeleteConfirm);
-elements.deleteConfirmSubmit.addEventListener("click", confirmDeleteCard);
+elements.deleteConfirmCancel.addEventListener("click", closeConfirmModal);
+elements.deleteConfirmSubmit.addEventListener("click", submitConfirmModal);
 elements.deleteConfirmModal.addEventListener("click", (event) => {
-  if (event.target.closest?.("[data-confirm-cancel]")) closeDeleteConfirm();
+  if (event.target.closest?.("[data-confirm-cancel]")) closeConfirmModal();
 });
 elements.deleteConfirmModal.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeDeleteConfirm();
+  if (event.key === "Escape") closeConfirmModal();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedEditorChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 elements.imageInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
