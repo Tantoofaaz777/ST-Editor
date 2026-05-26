@@ -123,18 +123,25 @@ body {
   margin: 0;
   min-height: 100vh;
   overflow-x: hidden;
-  background:
-    linear-gradient(135deg, rgba(79, 183, 162, 0.12), transparent 28rem),
-    linear-gradient(315deg, rgba(214, 164, 99, 0.12), transparent 32rem),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
 }
 
-:root[data-theme="light"] body {
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(79, 183, 162, 0.12), transparent 28rem),
+    linear-gradient(315deg, rgba(214, 164, 99, 0.12), transparent 32rem);
+}
+
+:root[data-theme="light"] body::before {
   background:
     linear-gradient(135deg, rgba(79, 183, 162, 0.16), transparent 28rem),
-    linear-gradient(315deg, rgba(214, 164, 99, 0.18), transparent 32rem),
-    var(--bg);
+    linear-gradient(315deg, rgba(214, 164, 99, 0.18), transparent 32rem);
 }
 
 body.modal-open {
@@ -160,6 +167,8 @@ button {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
 }
 
