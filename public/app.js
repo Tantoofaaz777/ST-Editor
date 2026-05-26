@@ -836,7 +836,7 @@ function renderLibrary() {
   elements.libraryGrid.classList.toggle("is-list-view", state.viewMode === "list");
   elements.filterMenu.hidden = isPersonas;
   elements.importInput.closest(".file-button").style.display = isPersonas ? "none" : "";
-  elements.newButton.textContent = isPersonas ? "New persona" : "New character";
+  updateNewButtonLabel(isPersonas ? "New persona" : "New character");
   elements.search.placeholder = isPersonas ? "Name, description..." : "Name, tag, creator...";
   elements.charactersTab.classList.toggle("active", !isPersonas);
   elements.personasTab.classList.toggle("active", isPersonas);
@@ -863,6 +863,15 @@ function renderLibrary() {
       renderCharacterLibraryItem(item);
     }
   }
+}
+
+function updateNewButtonLabel(label) {
+  const text = elements.newButton.querySelector("span");
+  if (text) {
+    text.textContent = label;
+    return;
+  }
+  elements.newButton.textContent = label;
 }
 
 function renderCharacterLibraryItem(card) {
@@ -1094,11 +1103,8 @@ function enhanceTextareas(root = document) {
     button.className = "expand-editor-button";
     button.type = "button";
     button.innerHTML = `
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path d="M8 3H3v5" />
-        <path d="M3 3l7 7" />
-        <path d="M16 21h5v-5" />
-        <path d="M21 21l-7-7" />
+      <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+        <path d="M280-280h120q17 0 28.5 11.5T440-240q0 17-11.5 28.5T400-200H240q-17 0-28.5-11.5T200-240v-160q0-17 11.5-28.5T240-440q17 0 28.5 11.5T280-400v120Zm400-400H560q-17 0-28.5-11.5T520-720q0-17 11.5-28.5T560-760h160q17 0 28.5 11.5T760-720v160q0 17-11.5 28.5T720-520q-17 0-28.5-11.5T680-560v-120Z" />
       </svg>
     `;
     button.setAttribute("aria-label", `Open ${getTextareaLabel(textarea)} in fullscreen editor`);
