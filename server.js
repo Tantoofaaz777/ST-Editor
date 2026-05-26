@@ -27,6 +27,7 @@ const mimeTypes = {
   ".js": "text/javascript; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".zip": "application/zip",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -676,6 +677,212 @@ function sendPersonaAsset(request, response, personaId, kind) {
   });
 }
 
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipDateParts(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { dosTime, dosDate };
+}
+
+function zipEntryPath(value) {
+  return String(value).replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function createZip(entries) {
+  const chunks = [];
+  const centralDirectory = [];
+  let offset = 0;
+  const { dosTime, dosDate } = zipDateParts();
+
+  for (const entry of entries) {
+    const name = Buffer.from(zipEntryPath(entry.name), "utf8");
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(String(entry.data || ""), "utf8");
+    const checksum = crc32(data);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(dosTime, 10);
+    localHeader.writeUInt16LE(dosDate, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    chunks.push(localHeader, name, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(dosTime, 12);
+    centralHeader.writeUInt16LE(dosDate, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralDirectory.push(centralHeader, name);
+
+    offset += localHeader.length + name.length + data.length;
+  }
+
+  const centralDirectorySize = centralDirectory.reduce((size, chunk) => size + chunk.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralDirectorySize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...chunks, ...centralDirectory, end]);
+}
+
+function collectAssetEntries(callback) {
+  const entries = [];
+
+  function walk(directory, done) {
+    fs.readdir(directory, { withFileTypes: true }, (error, dirents = []) => {
+      if (error) {
+        done(error);
+        return;
+      }
+
+      let index = 0;
+      function next(nextError) {
+        if (nextError) {
+          done(nextError);
+          return;
+        }
+        if (index >= dirents.length) {
+          done();
+          return;
+        }
+
+        const dirent = dirents[index];
+        index += 1;
+        const filePath = path.join(directory, dirent.name);
+        if (dirent.isDirectory()) {
+          walk(filePath, next);
+          return;
+        }
+        if (!dirent.isFile()) {
+          next();
+          return;
+        }
+
+        fs.readFile(filePath, (fileError, data) => {
+          if (!fileError) {
+            const relativePath = zipEntryPath(path.relative(assetsDir, filePath));
+            entries.push({ name: `st-editor-backup/assets/${relativePath}`, data });
+          }
+          next(fileError);
+        });
+      }
+
+      next();
+    });
+  }
+
+  fs.access(assetsDir, fs.constants.F_OK, (error) => {
+    if (error && error.code === "ENOENT") {
+      callback(null, []);
+      return;
+    }
+    if (error) {
+      callback(error);
+      return;
+    }
+    walk(assetsDir, (walkError) => callback(walkError, entries));
+  });
+}
+
+function buildBackupZip(callback) {
+  readMigratedCards((cardsError, cards = []) => {
+    if (cardsError) {
+      callback(cardsError);
+      return;
+    }
+    readMigratedPersonas((personasError, personas = []) => {
+      if (personasError) {
+        callback(personasError);
+        return;
+      }
+      collectAssetEntries((assetsError, assetEntries = []) => {
+        if (assetsError) {
+          callback(assetsError);
+          return;
+        }
+
+        const exportedAt = new Date().toISOString();
+        const manifest = {
+          app: "ST Editor",
+          backupVersion: 1,
+          exportedAt,
+          counts: {
+            cards: cards.length,
+            personas: personas.length,
+            assets: assetEntries.length
+          }
+        };
+        const entries = [
+          { name: "st-editor-backup/manifest.json", data: JSON.stringify(manifest, null, 2) },
+          { name: "st-editor-backup/cards.json", data: JSON.stringify(cards, null, 2) },
+          { name: "st-editor-backup/personas.json", data: JSON.stringify(personas, null, 2) },
+          ...assetEntries
+        ];
+        callback(null, createZip(entries), exportedAt);
+      });
+    });
+  });
+}
+
+function handleBackupApi(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/backup/export") {
+    buildBackupZip((error, zip, exportedAt) => {
+      if (error) {
+        sendJson(request, response, 500, { error: "Could not create backup" });
+        return;
+      }
+      const date = exportedAt.slice(0, 10);
+      sendWithHeaders(response, 200, zip, mimeTypes[".zip"], {
+        "Content-Disposition": `attachment; filename="st-editor-backup-${date}.zip"`
+      });
+    });
+    return;
+  }
+
+  send(response, 405, JSON.stringify({ error: "Method not allowed" }), mimeTypes[".json"]);
+}
+
 function handleCardsApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/cards/summary") {
     readMigratedCards((error, cards = []) => {
@@ -882,6 +1089,11 @@ const server = http.createServer((request, response) => {
 
   if (url.pathname === "/api/personas" || url.pathname.startsWith("/api/personas/")) {
     handlePersonasApi(request, response, url);
+    return;
+  }
+
+  if (url.pathname === "/api/backup/export") {
+    handleBackupApi(request, response, url);
     return;
   }
 

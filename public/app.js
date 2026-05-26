@@ -69,6 +69,7 @@ const elements = {
   themeToggle: document.querySelector("#theme-toggle"),
   settingsButton: document.querySelector("#settings-button"),
   settingsBackButton: document.querySelector("#settings-back-button"),
+  backupExportButton: document.querySelector("#backup-export-button"),
   customSelects: document.querySelectorAll(".custom-select"),
   charactersTab: document.querySelector("#characters-tab"),
   personasTab: document.querySelector("#personas-tab"),
@@ -1627,6 +1628,35 @@ async function downloadActivePersonaImage() {
   showToast("Persona image downloaded.");
 }
 
+async function exportLibraryBackup() {
+  try {
+    const response = await fetch("/api/backup/export");
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not export backup: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const today = new Date().toISOString().slice(0, 10);
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    anchor.href = url;
+    anchor.download = filenameMatch?.[1] || `st-editor-backup-${today}.zip`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast("Library backup exported.");
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not export the library backup.");
+  }
+}
+
 async function importCard(file) {
   const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
   if (isPng) {
@@ -2118,6 +2148,7 @@ elements.saveButton.addEventListener("click", saveActiveCard);
 elements.personaSaveButton.addEventListener("click", saveActivePersona);
 elements.personaCopyButton.addEventListener("click", copyActivePersonaDescription);
 elements.personaDownloadImageButton.addEventListener("click", downloadActivePersonaImage);
+elements.backupExportButton.addEventListener("click", exportLibraryBackup);
 elements.exportButton.addEventListener("click", exportActiveCard);
 elements.exportPngButton.addEventListener("click", exportActiveCardPng);
 elements.duplicateButton.addEventListener("click", duplicateCard);
