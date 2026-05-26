@@ -814,6 +814,11 @@ label span,
   font-size: 1rem;
 }
 
+.library-actions .file-button span {
+  color: inherit;
+  font-size: inherit;
+}
+
 .icon-label-button svg,
 .file-button svg {
   width: 1rem;
