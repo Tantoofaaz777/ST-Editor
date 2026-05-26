@@ -937,14 +937,21 @@ form label,
   place-items: center;
   width: 2rem;
   height: 2rem;
-  padding: 0 0 0.12rem;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 0.45rem;
   background: rgba(79, 183, 162, 0.14);
   color: var(--accent-strong);
-  font-size: 1.25rem;
   font-weight: 850;
   line-height: 1;
+}
+
+.icon-button svg,
+.move-greeting-button svg,
+.remove-greeting-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
 }
 
 .icon-button:hover {
@@ -1002,7 +1009,6 @@ form label,
 .move-greeting-button {
   background: rgba(79, 183, 162, 0.1);
   color: var(--accent-strong);
-  font-size: 1rem;
 }
 
 .move-greeting-button:hover:not(:disabled) {
@@ -1016,10 +1022,8 @@ form label,
 }
 
 .remove-greeting-button {
-  padding-bottom: 0.12rem;
   background: rgba(240, 120, 120, 0.1);
   color: var(--danger);
-  font-size: 1.2rem;
 }
 
 .remove-greeting-button:hover {
