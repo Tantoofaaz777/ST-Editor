@@ -3,6 +3,7 @@ import { renderMarkdown } from "./vendor/markdown.js";
 const storageKey = "st-editor.cards.v1";
 const personaStorageKey = "st-editor.personas.v1";
 const recoveryStorageKey = "st-editor.auth-recovery.v1";
+const themeStorageKey = "st-editor.theme.v1";
 const libraryPageSize = 25;
 
 const fields = [
@@ -64,6 +65,7 @@ const elements = {
   sortFieldButton: document.querySelector("#sort-field-button"),
   sortDirectionButton: document.querySelector("#sort-direction-button"),
   viewModeButton: document.querySelector("#view-mode-button"),
+  themeToggle: document.querySelector("#theme-toggle"),
   customSelects: document.querySelectorAll(".custom-select"),
   charactersTab: document.querySelector("#characters-tab"),
   personasTab: document.querySelector("#personas-tab"),
@@ -141,6 +143,15 @@ const viewModeIcons = {
   `,
   list: `
     <path d="M320-600q-17 0-28.5-11.5T280-640q0-17 11.5-28.5T320-680h480q17 0 28.5 11.5T840-640q0 17-11.5 28.5T800-600H320Zm0 160q-17 0-28.5-11.5T280-480q0-17 11.5-28.5T320-520h480q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H320Zm0 160q-17 0-28.5-11.5T280-320q0-17 11.5-28.5T320-360h480q17 0 28.5 11.5T840-320q0 17-11.5 28.5T800-280H320ZM160-600q-17 0-28.5-11.5T120-640q0-17 11.5-28.5T160-680q17 0 28.5 11.5T200-640q0 17-11.5 28.5T160-600Zm0 160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520q17 0 28.5 11.5T200-480q0 17-11.5 28.5T160-440Zm0 160q-17 0-28.5-11.5T120-320q0-17 11.5-28.5T160-360q17 0 28.5 11.5T200-320q0 17-11.5 28.5T160-280Z" />
+  `
+};
+
+const themeIcons = {
+  dark: `
+    <path d="M480-360q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T280-480q0-83 58.5-141.5T480-680q83 0 141.5 58.5T680-480q0 83-58.5 141.5T480-280ZM200-440H80q-17 0-28.5-11.5T40-480q0-17 11.5-28.5T80-520h120q17 0 28.5 11.5T240-480q0 17-11.5 28.5T200-440Zm680 0H760q-17 0-28.5-11.5T720-480q0-17 11.5-28.5T760-520h120q17 0 28.5 11.5T920-480q0 17-11.5 28.5T880-440ZM480-720q-17 0-28.5-11.5T440-760v-120q0-17 11.5-28.5T480-920q17 0 28.5 11.5T520-880v120q0 17-11.5 28.5T480-720Zm0 680q-17 0-28.5-11.5T440-80v-120q0-17 11.5-28.5T480-240q17 0 28.5 11.5T520-200v120q0 17-11.5 28.5T480-40ZM256-650l-69-68q-12-12-12-28.5t12-28.5q12-12 28.5-12t28.5 12l68 69q11 12 11 28t-11 28q-11 12-28 12t-28-12Zm460 460-68-69q-11-12-11-28t11-28q11-12 28-12t28 12l69 68q12 12 12 28.5T773-190q-12 12-28.5 12T716-190Zm-68-460q-11-12-11-28t11-28l68-69q12-12 28.5-12t28.5 12q12 12 12 28.5T773-718l-69 68q-11 12-28 12t-28-12ZM187-190q-12-12-12-28.5t12-28.5l69-68q11-12 28-12t28 12q11 12 11 28t-11 28l-68 69q-12 12-28.5 12T187-190Zm293-290Z" />
+  `,
+  light: `
+    <path d="M480-120q-150 0-255-105T120-480q0-138 90-239.5T440-838q13-2 23 3.5t16 14.5q6 9 6.5 21t-7.5 23q-17 26-25.5 55T444-660q0 90 63 153t153 63q31 0 61-8.5t55-25.5q11-7 23-7t21 5q10 6 15.5 16t3.5 24q-14 140-116.5 230T480-120Zm0-80q88 0 158-48.5T740-375q-20 5-40 8t-40 3q-123 0-209.5-86.5T364-660q0-20 3-40t8-40q-78 32-126.5 102T200-480q0 116 82 198t198 82Zm-10-270Z" />
   `
 };
 
@@ -735,6 +746,24 @@ function updateViewModeButton() {
   const icon = elements.viewModeButton.querySelector("svg");
   if (label) label.textContent = viewModeLabels[state.viewMode];
   if (icon) icon.innerHTML = viewModeIcons[state.viewMode];
+}
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  const isLight = nextTheme === "light";
+  document.documentElement.dataset.theme = nextTheme;
+  const icon = elements.themeToggle?.querySelector("svg");
+  if (icon) icon.innerHTML = themeIcons[nextTheme];
+  elements.themeToggle?.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+  elements.themeToggle?.setAttribute("title", isLight ? "Switch to dark theme" : "Switch to light theme");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isLight ? "#f4f1eb" : "#151515");
+  try {
+    localStorage.setItem(themeStorageKey, nextTheme);
+  } catch {}
 }
 
 function isEditorVisible() {
@@ -1955,6 +1984,9 @@ elements.viewModeButton.addEventListener("click", () => {
   state.viewMode = state.viewMode === "grid" ? "list" : "grid";
   renderLibrary();
 });
+elements.themeToggle.addEventListener("click", () => {
+  applyTheme(currentTheme() === "light" ? "dark" : "light");
+});
 elements.paginationPrev.addEventListener("click", () => {
   const pageKey = activeLibraryPageKey();
   state.libraryPages[pageKey] = Math.max(1, (state.libraryPages[pageKey] || 1) - 1);
@@ -2075,6 +2107,7 @@ elements.importInput.addEventListener("change", async (event) => {
   }
 });
 
+applyTheme(currentTheme());
 await loadCards();
 await loadPersonas();
 enhanceTextareas(elements.form);

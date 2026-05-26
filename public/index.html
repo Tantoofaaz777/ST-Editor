@@ -8,6 +8,13 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <script>
+      try {
+        if (localStorage.getItem("st-editor.theme.v1") === "light") {
+          document.documentElement.dataset.theme = "light";
+        }
+      } catch {}
+    </script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -26,6 +33,11 @@
             <button class="active" id="characters-tab" type="button" data-library-type="characters">Characters</button>
             <button type="button" id="personas-tab" data-library-type="personas">Personas</button>
           </div>
+          <button class="ghost icon-action theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">
+            <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+              <path d="M480-360q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T280-480q0-83 58.5-141.5T480-680q83 0 141.5 58.5T680-480q0 83-58.5 141.5T480-280ZM200-440H80q-17 0-28.5-11.5T40-480q0-17 11.5-28.5T80-520h120q17 0 28.5 11.5T240-480q0 17-11.5 28.5T200-440Zm680 0H760q-17 0-28.5-11.5T720-480q0-17 11.5-28.5T760-520h120q17 0 28.5 11.5T920-480q0 17-11.5 28.5T880-440ZM480-720q-17 0-28.5-11.5T440-760v-120q0-17 11.5-28.5T480-920q17 0 28.5 11.5T520-880v120q0 17-11.5 28.5T480-720Zm0 680q-17 0-28.5-11.5T440-80v-120q0-17 11.5-28.5T480-240q17 0 28.5 11.5T520-200v120q0 17-11.5 28.5T480-40ZM256-650l-69-68q-12-12-12-28.5t12-28.5q12-12 28.5-12t28.5 12l68 69q11 12 11 28t-11 28q-11 12-28 12t-28-12Zm460 460-68-69q-11-12-11-28t11-28q11-12 28-12t28 12l69 68q12 12 12 28.5T773-190q-12 12-28.5 12T716-190Zm-68-460q-11-12-11-28t11-28l68-69q12-12 28.5-12t28.5 12q12 12 12 28.5T773-718l-69 68q-11 12-28 12t-28-12ZM187-190q-12-12-12-28.5t12-28.5l69-68q11-12 28-12t28 12q11 12 11 28t-11 28l-68 69q-12 12-28.5 12T187-190Zm293-290Z" />
+            </svg>
+          </button>
         </header>
 
         <section class="library-tools" aria-label="Library tools">
