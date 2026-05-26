@@ -1169,6 +1169,20 @@ textarea:focus {
   color: #81736a;
 }
 
+:root[data-theme="light"] .preview-header h3 {
+  color: var(--text);
+}
+
+:root[data-theme="light"] .preview-description {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .tag {
+  border-color: rgba(52, 143, 124, 0.18);
+  background: rgba(52, 143, 124, 0.1);
+  color: var(--accent-strong);
+}
+
 :root[data-theme="light"] .topbar,
 :root[data-theme="light"] .fullscreen-editor__bar {
   background: rgba(244, 241, 235, 0.82);
@@ -1418,6 +1432,7 @@ summary {
 .tag {
   max-width: 100%;
   padding: 0.25rem 0.5rem;
+  border: 1px solid rgba(116, 209, 189, 0.18);
   border-radius: 999px;
   background: rgba(116, 209, 189, 0.13);
   color: var(--accent-strong);
@@ -1427,7 +1442,7 @@ summary {
 
 .preview-description {
   margin: 0.75rem 0 0;
-  color: #ddd5cc;
+  color: var(--muted);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
