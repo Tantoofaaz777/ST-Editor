@@ -1213,6 +1213,13 @@ textarea:focus {
   background: transparent;
 }
 
+:root[data-theme="light"] .tag-filter input:checked + span {
+  border-color: rgba(33, 111, 96, 0.42);
+  background: rgba(52, 143, 124, 0.2);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px rgba(52, 143, 124, 0.16);
+}
+
 :root[data-theme="light"] .toast {
   background: rgba(255, 250, 243, 0.98);
 }
