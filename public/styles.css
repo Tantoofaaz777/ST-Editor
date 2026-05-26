@@ -1209,6 +1209,10 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.62);
 }
 
+:root[data-theme="light"] .filter-menu {
+  background: transparent;
+}
+
 :root[data-theme="light"] .toast {
   background: rgba(255, 250, 243, 0.98);
 }
