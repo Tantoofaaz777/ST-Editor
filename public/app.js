@@ -3,6 +3,7 @@ import { renderMarkdown } from "./vendor/markdown.js";
 const storageKey = "st-editor.cards.v1";
 const personaStorageKey = "st-editor.personas.v1";
 const recoveryStorageKey = "st-editor.auth-recovery.v1";
+const libraryPageSize = 25;
 
 const fields = [
   "name",
@@ -36,6 +37,10 @@ const state = {
   sortDirection: "asc",
   viewMode: "grid",
   view: "library",
+  libraryPages: {
+    characters: 1,
+    personas: 1
+  },
   libraryScrollY: 0
 };
 
@@ -48,6 +53,10 @@ const elements = {
   libraryGrid: document.querySelector("#library-grid"),
   emptyState: document.querySelector("#empty-state"),
   librarySectionTitle: document.querySelector("#library-section-title"),
+  pagination: document.querySelector("#pagination"),
+  paginationPrev: document.querySelector("#pagination-prev"),
+  paginationNext: document.querySelector("#pagination-next"),
+  paginationStatus: document.querySelector("#pagination-status"),
   search: document.querySelector("#search-input"),
   filterMenu: document.querySelector("#filter-menu"),
   filterCount: document.querySelector("#filter-count"),
@@ -827,14 +836,40 @@ function filteredPersonas() {
   });
 }
 
+function activeLibraryPageKey() {
+  return state.activeLibraryType === "personas" ? "personas" : "characters";
+}
+
+function resetActiveLibraryPage() {
+  state.libraryPages[activeLibraryPageKey()] = 1;
+}
+
+function paginatedLibraryItems(items) {
+  const pageKey = activeLibraryPageKey();
+  const pageCount = Math.max(1, Math.ceil(items.length / libraryPageSize));
+  const currentPage = Math.min(Math.max(1, state.libraryPages[pageKey] || 1), pageCount);
+  state.libraryPages[pageKey] = currentPage;
+  const start = (currentPage - 1) * libraryPageSize;
+  return {
+    currentPage,
+    pageCount,
+    pageItems: items.slice(start, start + libraryPageSize)
+  };
+}
+
 function renderLibrary() {
   const isPersonas = state.activeLibraryType === "personas";
   const items = isPersonas ? filteredPersonas() : filteredCards();
+  const { currentPage, pageCount, pageItems } = paginatedLibraryItems(items);
   const totalItems = isPersonas ? state.personas.length : state.cards.length;
 
   elements.libraryGrid.innerHTML = "";
   elements.librarySectionTitle.textContent = `${isPersonas ? "Personas" : "Characters"} (${items.length})`;
   elements.emptyState.hidden = items.length > 0;
+  elements.pagination.hidden = items.length <= libraryPageSize;
+  elements.paginationStatus.textContent = `Page ${currentPage} of ${pageCount}`;
+  elements.paginationPrev.disabled = currentPage <= 1;
+  elements.paginationNext.disabled = currentPage >= pageCount;
   elements.libraryGrid.classList.toggle("is-list-view", state.viewMode === "list");
   elements.filterMenu.hidden = isPersonas;
   elements.importInput.closest(".file-button").style.display = isPersonas ? "none" : "";
@@ -858,7 +893,7 @@ function renderLibrary() {
       : "Create a new character or clear your search.";
   }
 
-  for (const item of items) {
+  for (const item of pageItems) {
     if (isPersonas) {
       renderPersonaLibraryItem(item);
     } else {
@@ -1879,6 +1914,7 @@ elements.fullscreenEditor.addEventListener("keydown", (event) => {
 });
 elements.search.addEventListener("input", (event) => {
   state.search = event.target.value;
+  resetActiveLibraryPage();
   renderLibrary();
 });
 elements.filterTags.addEventListener("change", (event) => {
@@ -1889,6 +1925,7 @@ elements.filterTags.addEventListener("change", (event) => {
   } else {
     state.selectedTags.delete(input.value);
   }
+  resetActiveLibraryPage();
   renderLibrary();
 });
 elements.customSelects.forEach((select) => {
@@ -1910,6 +1947,7 @@ elements.customSelects.forEach((select) => {
       state.sortDirection = option.dataset.value;
     }
     closeCustomSelects();
+    resetActiveLibraryPage();
     renderLibrary();
   });
 });
@@ -1917,14 +1955,28 @@ elements.viewModeButton.addEventListener("click", () => {
   state.viewMode = state.viewMode === "grid" ? "list" : "grid";
   renderLibrary();
 });
+elements.paginationPrev.addEventListener("click", () => {
+  const pageKey = activeLibraryPageKey();
+  state.libraryPages[pageKey] = Math.max(1, (state.libraryPages[pageKey] || 1) - 1);
+  renderLibrary();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+elements.paginationNext.addEventListener("click", () => {
+  const pageKey = activeLibraryPageKey();
+  state.libraryPages[pageKey] = (state.libraryPages[pageKey] || 1) + 1;
+  renderLibrary();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 elements.charactersTab.addEventListener("click", () => {
   state.activeLibraryType = "characters";
   state.selectedTags.clear();
+  resetActiveLibraryPage();
   renderLibrary();
 });
 elements.personasTab.addEventListener("click", () => {
   state.activeLibraryType = "personas";
   state.selectedTags.clear();
+  resetActiveLibraryPage();
   renderLibrary();
 });
 document.addEventListener("click", (event) => {
