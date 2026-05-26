@@ -210,21 +210,23 @@ function normalizeImportedCard(raw) {
 }
 
 function toSillyTavernJson(card) {
+  const sourceData = card.data || {};
   const data = {
-    name: card.data.name || "",
-    description: card.data.description || "",
-    personality: card.data.personality || "",
-    scenario: card.data.scenario || "",
-    first_mes: card.data.first_mes || "",
-    mes_example: card.data.mes_example || "",
-    creator_notes: card.data.creator_notes || "",
-    system_prompt: card.data.system_prompt || "",
-    post_history_instructions: card.data.post_history_instructions || "",
-    alternate_greetings: card.data.alternate_greetings || [],
-    tags: card.data.tags || [],
-    creator: card.data.creator || "",
-    character_version: card.data.character_version || "",
-    extensions: card.data.extensions || {}
+    ...sourceData,
+    name: sourceData.name || "",
+    description: sourceData.description || "",
+    personality: sourceData.personality || "",
+    scenario: sourceData.scenario || "",
+    first_mes: sourceData.first_mes || "",
+    mes_example: sourceData.mes_example || "",
+    creator_notes: sourceData.creator_notes || "",
+    system_prompt: sourceData.system_prompt || "",
+    post_history_instructions: sourceData.post_history_instructions || "",
+    alternate_greetings: sourceData.alternate_greetings || [],
+    tags: sourceData.tags || [],
+    creator: sourceData.creator || "",
+    character_version: sourceData.character_version || "",
+    extensions: sourceData.extensions || {}
   };
 
   return {
