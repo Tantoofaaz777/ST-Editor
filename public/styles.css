@@ -1779,15 +1779,15 @@ summary {
   }
 
   .library-header {
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: 1fr auto;
   }
 
   .brand {
-    grid-column: 1 / -1;
+    grid-column: 1;
   }
 
   .library-tabs {
-    grid-column: 2;
+    grid-column: 1 / -1;
     justify-self: center;
     justify-content: center;
     width: max-content;
@@ -1795,7 +1795,7 @@ summary {
   }
 
   .library-header-actions {
-    grid-column: 3;
+    grid-column: 2;
     justify-self: end;
   }
 
