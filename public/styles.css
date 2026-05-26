@@ -661,7 +661,7 @@ button {
 .library-grid.is-list-view .library-item > p {
   margin: 0;
   overflow: hidden;
-  color: #d8d0c7;
+  color: var(--muted);
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1145,6 +1145,28 @@ textarea:focus {
 
 :root[data-theme="light"] .library-item {
   background: rgba(255, 250, 243, 0.84);
+}
+
+:root[data-theme="light"] .library-grid.is-list-view .library-item {
+  color: var(--text);
+}
+
+:root[data-theme="light"] .library-grid.is-list-view .library-item > p {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .library-grid.is-list-view .library-item__top > div:last-child p {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .library-grid.is-list-view .meta-pill {
+  border-color: rgba(129, 115, 100, 0.24);
+  background: rgba(255, 255, 255, 0.72);
+  color: #62564d;
+}
+
+:root[data-theme="light"] .library-grid.is-list-view .date-meta {
+  color: #81736a;
 }
 
 :root[data-theme="light"] .topbar,
