@@ -242,6 +242,12 @@ button {
   stroke-width: 2;
 }
 
+.icon-text-button svg.material-icon,
+.icon-action svg.material-icon {
+  fill: currentColor;
+  stroke: none;
+}
+
 .filter-menu {
   position: relative;
   flex: 0 0 auto;
@@ -784,6 +790,11 @@ label span,
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+.icon-action svg.material-icon {
+  fill: currentColor;
+  stroke: none;
 }
 
 .editor-actions {
