@@ -47,6 +47,7 @@ const state = {
 
 const elements = {
   libraryView: document.querySelector("#library-view"),
+  settingsView: document.querySelector("#settings-view"),
   editorView: document.querySelector("#editor-view"),
   personaEditorView: document.querySelector("#persona-editor-view"),
   form: document.querySelector("#card-form"),
@@ -66,6 +67,8 @@ const elements = {
   sortDirectionButton: document.querySelector("#sort-direction-button"),
   viewModeButton: document.querySelector("#view-mode-button"),
   themeToggle: document.querySelector("#theme-toggle"),
+  settingsButton: document.querySelector("#settings-button"),
+  settingsBackButton: document.querySelector("#settings-back-button"),
   customSelects: document.querySelectorAll(".custom-select"),
   charactersTab: document.querySelector("#characters-tab"),
   personasTab: document.querySelector("#personas-tab"),
@@ -1322,16 +1325,28 @@ function showLibrary() {
   setPersonaSaveStatus(false);
   state.view = "library";
   elements.libraryView.classList.remove("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
   elements.editorView.classList.add("is-hidden");
   elements.personaEditorView.classList.add("is-hidden");
   renderLibrary();
   requestAnimationFrame(() => window.scrollTo(0, state.libraryScrollY));
 }
 
+function showSettings() {
+  if (state.view === "library") state.libraryScrollY = window.scrollY;
+  state.view = "settings";
+  elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.remove("is-hidden");
+  elements.editorView.classList.add("is-hidden");
+  elements.personaEditorView.classList.add("is-hidden");
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
 async function showEditor() {
   if (state.view === "library") state.libraryScrollY = window.scrollY;
   state.view = "editor";
   elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
   elements.editorView.classList.remove("is-hidden");
   elements.personaEditorView.classList.add("is-hidden");
   window.scrollTo(0, 0);
@@ -1347,6 +1362,7 @@ function showPersonaEditor() {
   if (state.view === "library") state.libraryScrollY = window.scrollY;
   state.view = "persona-editor";
   elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
   elements.editorView.classList.add("is-hidden");
   elements.personaEditorView.classList.remove("is-hidden");
   window.scrollTo(0, 0);
@@ -2062,6 +2078,7 @@ elements.viewModeButton.addEventListener("click", () => {
 elements.themeToggle.addEventListener("click", () => {
   applyTheme(currentTheme() === "light" ? "dark" : "light");
 });
+elements.settingsButton.addEventListener("click", showSettings);
 elements.paginationPrev.addEventListener("click", () => {
   const pageKey = activeLibraryPageKey();
   state.libraryPages[pageKey] = Math.max(1, (state.libraryPages[pageKey] || 1) - 1);
@@ -2096,6 +2113,7 @@ document.addEventListener("click", (event) => {
 elements.newButton.addEventListener("click", createCard);
 elements.backButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
 elements.personaBackButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
+elements.settingsBackButton.addEventListener("click", showLibrary);
 elements.saveButton.addEventListener("click", saveActiveCard);
 elements.personaSaveButton.addEventListener("click", saveActivePersona);
 elements.personaCopyButton.addEventListener("click", copyActivePersonaDescription);

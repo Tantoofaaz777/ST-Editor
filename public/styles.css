@@ -462,7 +462,15 @@ button {
   padding: 0.3rem;
 }
 
-.theme-toggle {
+.library-header-actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 0.5rem;
+}
+
+.theme-toggle,
+.settings-button {
   justify-self: end;
   align-self: center;
 }
@@ -719,6 +727,17 @@ button {
 
 .empty-state[hidden] {
   display: none;
+}
+
+.settings-shell {
+  display: grid;
+  gap: 1rem;
+  min-height: 100vh;
+}
+
+.settings-topbar h2 {
+  margin: 0;
+  font-size: 1.15rem;
 }
 
 .brand {
@@ -1775,7 +1794,7 @@ summary {
     max-width: 100%;
   }
 
-  .theme-toggle {
+  .library-header-actions {
     grid-column: 3;
     justify-self: end;
   }
