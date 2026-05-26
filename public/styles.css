@@ -733,21 +733,28 @@ button {
   display: grid;
   grid-template-rows: auto 1fr;
   align-content: start;
-  gap: 1.25rem;
+  gap: 1rem;
   min-height: 100vh;
 }
 
 .topbar.settings-topbar {
   justify-content: center;
+  padding-block: 1rem;
 }
 
 .topbar.settings-topbar .title-stack {
   width: min(52rem, 100%);
+  gap: 0.65rem;
 }
 
 .settings-topbar h2 {
   margin: 0;
-  font-size: clamp(1.8rem, 4vw, 2.35rem);
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 850;
+  line-height: 1;
 }
 
 .settings-content {
