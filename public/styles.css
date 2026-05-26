@@ -87,6 +87,11 @@
   scrollbar-width: thin;
 }
 
+html {
+  min-height: 100%;
+  background: var(--bg);
+}
+
 ::-webkit-scrollbar {
   width: 0.55rem;
   height: 0.55rem;
