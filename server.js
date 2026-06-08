@@ -278,7 +278,7 @@ function sendAuthRequired(response) {
   );
 }
 
-function readRequestBody(request, response, callback) {
+function readRequestBuffer(request, response, callback) {
   const chunks = [];
   let size = 0;
   request.on("data", (chunk) => {
@@ -290,10 +290,14 @@ function readRequestBody(request, response, callback) {
     }
     chunks.push(chunk);
   });
-  request.on("end", () => callback(Buffer.concat(chunks).toString("utf8")));
+  request.on("end", () => callback(Buffer.concat(chunks)));
   request.on("error", () => {
     send(response, 400, JSON.stringify({ error: "Could not read request" }), mimeTypes[".json"]);
   });
+}
+
+function readRequestBody(request, response, callback) {
+  readRequestBuffer(request, response, (body) => callback(body.toString("utf8")));
 }
 
 function readJsonArray(file, callback) {
@@ -766,6 +770,169 @@ function createZip(entries) {
   return Buffer.concat([...chunks, ...centralDirectory, end]);
 }
 
+function readUInt16(buffer, offset) {
+  if (offset + 2 > buffer.length) throw new Error("Invalid ZIP file");
+  return buffer.readUInt16LE(offset);
+}
+
+function readUInt32(buffer, offset) {
+  if (offset + 4 > buffer.length) throw new Error("Invalid ZIP file");
+  return buffer.readUInt32LE(offset);
+}
+
+function parseZip(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 22) throw new Error("Invalid ZIP file");
+  const minEndOffset = Math.max(0, buffer.length - 0xffff - 22);
+  let endOffset = -1;
+  for (let offset = buffer.length - 22; offset >= minEndOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) {
+      endOffset = offset;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error("Invalid ZIP file");
+
+  const entryCount = readUInt16(buffer, endOffset + 10);
+  const centralDirectoryOffset = readUInt32(buffer, endOffset + 16);
+  let offset = centralDirectoryOffset;
+  const entries = new Map();
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (readUInt32(buffer, offset) !== 0x02014b50) throw new Error("Invalid ZIP file");
+    const flags = readUInt16(buffer, offset + 8);
+    const method = readUInt16(buffer, offset + 10);
+    const compressedSize = readUInt32(buffer, offset + 20);
+    const uncompressedSize = readUInt32(buffer, offset + 24);
+    const nameLength = readUInt16(buffer, offset + 28);
+    const extraLength = readUInt16(buffer, offset + 30);
+    const commentLength = readUInt16(buffer, offset + 32);
+    const localHeaderOffset = readUInt32(buffer, offset + 42);
+    const nameStart = offset + 46;
+    const name = buffer
+      .slice(nameStart, nameStart + nameLength)
+      .toString(flags & 0x0800 ? "utf8" : "latin1");
+    offset = nameStart + nameLength + extraLength + commentLength;
+
+    if (name.endsWith("/")) continue;
+    if (method !== 0 && method !== 8) throw new Error("Unsupported ZIP compression method");
+    if (readUInt32(buffer, localHeaderOffset) !== 0x04034b50) throw new Error("Invalid ZIP file");
+    const localNameLength = readUInt16(buffer, localHeaderOffset + 26);
+    const localExtraLength = readUInt16(buffer, localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
+    const compressed = buffer.slice(dataStart, dataStart + compressedSize);
+    const data = method === 0 ? compressed : zlib.inflateRawSync(compressed);
+    if (data.length !== uncompressedSize) throw new Error("Invalid ZIP entry size");
+    entries.set(zipEntryPath(name), data);
+  }
+
+  return entries;
+}
+
+function readBackupJson(entries, name) {
+  const data = entries.get(name);
+  if (!data) throw new Error(`Backup is missing ${name}`);
+  const value = JSON.parse(data.toString("utf8").replace(/^\uFEFF/, ""));
+  if (!Array.isArray(value)) throw new Error(`${name} must contain an array`);
+  return value;
+}
+
+function safeBackupAssetPath(entryName) {
+  const prefix = "st-editor-backup/assets/";
+  if (!entryName.startsWith(prefix)) return null;
+  const relativePath = zipEntryPath(entryName.slice(prefix.length));
+  if (!relativePath || relativePath.includes("..") || path.isAbsolute(relativePath)) {
+    throw new Error("Backup contains an unsafe asset path");
+  }
+  return relativePath;
+}
+
+function writeAssetEntries(entries, callback) {
+  const tempAssetsDir = path.join(dataDir, `.assets-import-${Date.now()}-${crypto.randomUUID()}`);
+  const assetEntries = [];
+  for (const [name, data] of entries) {
+    const relativePath = safeBackupAssetPath(name);
+    if (relativePath) assetEntries.push({ relativePath, data });
+  }
+
+  function cleanup(error) {
+    fs.rm(tempAssetsDir, { recursive: true, force: true }, () => callback(error));
+  }
+
+  fs.mkdir(tempAssetsDir, { recursive: true }, (mkdirError) => {
+    if (mkdirError) {
+      callback(mkdirError);
+      return;
+    }
+
+    let index = 0;
+    function next(error) {
+      if (error) {
+        cleanup(error);
+        return;
+      }
+      if (index >= assetEntries.length) {
+        fs.rm(assetsDir, { recursive: true, force: true }, (removeError) => {
+          if (removeError) {
+            cleanup(removeError);
+            return;
+          }
+          fs.rename(tempAssetsDir, assetsDir, callback);
+        });
+        return;
+      }
+
+      const entry = assetEntries[index];
+      index += 1;
+      const targetPath = path.join(tempAssetsDir, entry.relativePath);
+      if (!targetPath.startsWith(tempAssetsDir + path.sep)) {
+        cleanup(new Error("Backup contains an unsafe asset path"));
+        return;
+      }
+      fs.mkdir(path.dirname(targetPath), { recursive: true }, (dirError) => {
+        if (dirError) {
+          cleanup(dirError);
+          return;
+        }
+        fs.writeFile(targetPath, entry.data, next);
+      });
+    }
+
+    next();
+  });
+}
+
+function importBackupZip(zip, callback) {
+  let entries;
+  let cards;
+  let personas;
+  try {
+    entries = parseZip(zip);
+    cards = readBackupJson(entries, "st-editor-backup/cards.json");
+    personas = readBackupJson(entries, "st-editor-backup/personas.json");
+    if (entries.has("st-editor-backup/manifest.json")) {
+      const manifest = JSON.parse(entries.get("st-editor-backup/manifest.json").toString("utf8"));
+      if (!isRecord(manifest) || manifest.app !== "ST Editor") throw new Error("Invalid backup manifest");
+    }
+  } catch (error) {
+    callback(error);
+    return;
+  }
+
+  writeAssetEntries(entries, (assetsError) => {
+    if (assetsError) {
+      callback(assetsError);
+      return;
+    }
+    writeCards(cards.filter(isRecord), (cardsError) => {
+      if (cardsError) {
+        callback(cardsError);
+        return;
+      }
+      writePersonas(personas.filter(isRecord), callback);
+    });
+  });
+}
+
 function collectAssetEntries(callback) {
   const entries = [];
 
@@ -875,6 +1042,19 @@ function handleBackupApi(request, response, url) {
       const date = exportedAt.slice(0, 10);
       sendWithHeaders(response, 200, zip, mimeTypes[".zip"], {
         "Content-Disposition": `attachment; filename="st-editor-backup-${date}.zip"`
+      });
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/backup/import") {
+    readRequestBuffer(request, response, (body) => {
+      importBackupZip(body, (error) => {
+        if (error) {
+          sendJson(request, response, 400, { error: "Could not import backup" });
+          return;
+        }
+        sendJson(request, response, 200, { ok: true });
       });
     });
     return;
@@ -1092,7 +1272,7 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  if (url.pathname === "/api/backup/export") {
+  if (url.pathname === "/api/backup/export" || url.pathname === "/api/backup/import") {
     handleBackupApi(request, response, url);
     return;
   }

@@ -70,6 +70,8 @@ const elements = {
   settingsButton: document.querySelector("#settings-button"),
   settingsBackButton: document.querySelector("#settings-back-button"),
   backupExportButton: document.querySelector("#backup-export-button"),
+  backupImportButton: document.querySelector("#backup-import-button"),
+  backupImportInput: document.querySelector("#backup-import-input"),
   customSelects: document.querySelectorAll(".custom-select"),
   charactersTab: document.querySelector("#characters-tab"),
   personasTab: document.querySelector("#personas-tab"),
@@ -125,6 +127,7 @@ let activeFullscreenTextarea = null;
 let isMarkdownPreviewActive = false;
 let pendingDeleteId = null;
 let pendingConfirmAction = null;
+let pendingBackupFile = null;
 
 class AuthRequiredError extends Error {}
 
@@ -1487,6 +1490,7 @@ function openConfirmModal({
 function closeConfirmModal() {
   pendingDeleteId = null;
   pendingConfirmAction = null;
+  pendingBackupFile = null;
   elements.deleteConfirmModal.hidden = true;
   document.body.classList.remove("modal-open");
 }
@@ -1654,6 +1658,56 @@ async function exportLibraryBackup() {
     }
     console.error(error);
     showToast("Could not export the library backup.");
+  }
+}
+
+function requestImportLibraryBackup(file) {
+  pendingBackupFile = file;
+  openConfirmModal({
+    eyebrow: "Import backup",
+    title: "Replace this library?",
+    message: "Importing a backup will replace the current cards, personas, and image assets in this app.",
+    submitLabel: "Import backup",
+    onConfirm: importPendingLibraryBackup
+  });
+}
+
+async function importPendingLibraryBackup() {
+  const file = pendingBackupFile;
+  closeConfirmModal();
+  pendingBackupFile = null;
+  if (!file) return;
+
+  try {
+    const response = await fetch("/api/backup/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      body: await file.arrayBuffer()
+    });
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not import backup: ${response.status}`);
+    }
+
+    localStorage.removeItem(storageKey);
+    localStorage.removeItem(personaStorageKey);
+    localStorage.removeItem(recoveryStorageKey);
+    state.draftCard = null;
+    state.draftPersona = null;
+    state.isDirty = false;
+    state.isPersonaDirty = false;
+    await loadCards();
+    await loadPersonas();
+    resetActiveLibraryPage();
+    renderLibrary();
+    showToast("Library backup imported.");
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not import the library backup.");
   }
 }
 
@@ -2149,6 +2203,13 @@ elements.personaSaveButton.addEventListener("click", saveActivePersona);
 elements.personaCopyButton.addEventListener("click", copyActivePersonaDescription);
 elements.personaDownloadImageButton.addEventListener("click", downloadActivePersonaImage);
 elements.backupExportButton.addEventListener("click", exportLibraryBackup);
+elements.backupImportButton.addEventListener("click", () => elements.backupImportInput.click());
+elements.backupImportInput.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  requestImportLibraryBackup(file);
+});
 elements.exportButton.addEventListener("click", exportActiveCard);
 elements.exportPngButton.addEventListener("click", exportActiveCardPng);
 elements.duplicateButton.addEventListener("click", duplicateCard);
