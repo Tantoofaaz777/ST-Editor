@@ -37,7 +37,8 @@ http://YOUR-LOCAL-IP:4173
 - Import `.json` and `.png` character cards.
 - Export `.json` and `.png` character cards ready to use in SillyTavern.
 - Offline token counting using the GPT-3.5/Turbo tokenizer.
-- No login, no AI, and no direct integration with ST folders.
+- Optional password login for remote/VPS use.
+- No AI and no direct integration with ST folders.
 
 ## Local Data
 
@@ -46,6 +47,26 @@ Cards are saved in `data/cards.json` inside this app folder. That file is ignore
 The repository keeps `data/.gitkeep` so the folder exists after cloning. The app creates `data/cards.json` automatically when cards are saved.
 
 Exporting JSON/PNG and keeping backups is still a good idea.
+
+## Authentication
+
+Authentication is enabled when these three variables exist:
+
+```env
+ST_EDITOR_USER=your_username
+ST_EDITOR_PASSWORD=your_password
+SESSION_SECRET=replace_this_with_a_long_random_string
+```
+
+For local-only use, you can run the app without them. For a VPS, copy `.env.example` to `.env` and replace the values before starting the app:
+
+```bash
+cp .env.example .env
+nano .env
+npm start
+```
+
+Do not commit `.env`. It is already ignored by Git.
 
 ## VPS Notes
 

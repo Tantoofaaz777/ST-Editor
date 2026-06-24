@@ -1,7 +1,10 @@
-import { countTokens } from "./vendor/tokenizer.js";
 import { renderMarkdown } from "./vendor/markdown.js";
 
 const storageKey = "st-editor.cards.v1";
+const personaStorageKey = "st-editor.personas.v1";
+const recoveryStorageKey = "st-editor.auth-recovery.v1";
+const themeStorageKey = "st-editor.theme.v1";
+const libraryPageSize = 25;
 
 const fields = [
   "name",
@@ -20,24 +23,42 @@ const fields = [
 
 const state = {
   cards: [],
+  personas: [],
   activeId: null,
+  activePersonaId: null,
   draftCard: null,
+  draftPersona: null,
   isDirty: false,
+  isPersonaDirty: false,
+  isMigratingThumbnails: false,
+  activeLibraryType: "characters",
   search: "",
   selectedTags: new Set(),
   sortField: "name",
   sortDirection: "asc",
   viewMode: "grid",
-  view: "library"
+  view: "library",
+  libraryPages: {
+    characters: 1,
+    personas: 1
+  },
+  libraryScrollY: 0
 };
 
 const elements = {
   libraryView: document.querySelector("#library-view"),
+  settingsView: document.querySelector("#settings-view"),
   editorView: document.querySelector("#editor-view"),
+  personaEditorView: document.querySelector("#persona-editor-view"),
   form: document.querySelector("#card-form"),
+  personaForm: document.querySelector("#persona-form"),
   libraryGrid: document.querySelector("#library-grid"),
   emptyState: document.querySelector("#empty-state"),
   librarySectionTitle: document.querySelector("#library-section-title"),
+  pagination: document.querySelector("#pagination"),
+  paginationPrev: document.querySelector("#pagination-prev"),
+  paginationNext: document.querySelector("#pagination-next"),
+  paginationStatus: document.querySelector("#pagination-status"),
   search: document.querySelector("#search-input"),
   filterMenu: document.querySelector("#filter-menu"),
   filterCount: document.querySelector("#filter-count"),
@@ -45,7 +66,15 @@ const elements = {
   sortFieldButton: document.querySelector("#sort-field-button"),
   sortDirectionButton: document.querySelector("#sort-direction-button"),
   viewModeButton: document.querySelector("#view-mode-button"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  settingsButton: document.querySelector("#settings-button"),
+  settingsBackButton: document.querySelector("#settings-back-button"),
+  backupExportButton: document.querySelector("#backup-export-button"),
+  backupImportButton: document.querySelector("#backup-import-button"),
+  backupImportInput: document.querySelector("#backup-import-input"),
   customSelects: document.querySelectorAll(".custom-select"),
+  charactersTab: document.querySelector("#characters-tab"),
+  personasTab: document.querySelector("#personas-tab"),
   importInput: document.querySelector("#import-input"),
   newButton: document.querySelector("#new-card-button"),
   backButton: document.querySelector("#back-button"),
@@ -63,31 +92,48 @@ const elements = {
   fullscreenEditorTitle: document.querySelector("#fullscreen-editor-title"),
   fullscreenMarkdownToggle: document.querySelector("#fullscreen-markdown-toggle"),
   fullscreenMarkdownPreview: document.querySelector("#fullscreen-markdown-preview"),
-  fullscreenTokenCount: document.querySelector("#fullscreen-token-count"),
   fullscreenEditorTextarea: document.querySelector("#fullscreen-editor-textarea"),
   fullscreenEditorClose: document.querySelector("#fullscreen-editor-close"),
   deleteConfirmModal: document.querySelector("#delete-confirm-modal"),
+  deleteConfirmEyebrow: document.querySelector("#delete-confirm-eyebrow"),
+  deleteConfirmTitle: document.querySelector("#delete-confirm-title"),
   deleteConfirmMessage: document.querySelector("#delete-confirm-message"),
   deleteConfirmCancel: document.querySelector("#delete-confirm-cancel"),
   deleteConfirmSubmit: document.querySelector("#delete-confirm-submit"),
   title: document.querySelector("#screen-title"),
   toast: document.querySelector("#toast"),
   previewName: document.querySelector("#preview-name"),
-  previewTokenCount: document.querySelector("#preview-token-count"),
   previewTags: document.querySelector("#preview-tags"),
   previewDescription: document.querySelector("#preview-description"),
   portraitImage: document.querySelector("#portrait-image"),
-  portraitInitial: document.querySelector("#portrait-initial")
+  portraitInitial: document.querySelector("#portrait-initial"),
+  personaBackButton: document.querySelector("#persona-back-button"),
+  personaSaveStatus: document.querySelector("#persona-save-status-pill"),
+  personaSaveButton: document.querySelector("#persona-save-button"),
+  personaCopyButton: document.querySelector("#persona-copy-button"),
+  personaDownloadImageButton: document.querySelector("#persona-download-image-button"),
+  personaDeleteButton: document.querySelector("#persona-delete-button"),
+  personaImageInput: document.querySelector("#persona-image-input"),
+  personaTitle: document.querySelector("#persona-screen-title"),
+  personaName: document.querySelector("#persona-name"),
+  personaDescription: document.querySelector("#persona-description"),
+  personaPreviewName: document.querySelector("#persona-preview-name"),
+  personaPreviewDescription: document.querySelector("#persona-preview-description"),
+  personaPortraitImage: document.querySelector("#persona-portrait-image"),
+  personaPortraitInitial: document.querySelector("#persona-portrait-initial")
 };
 
 let activeFullscreenTextarea = null;
 let isMarkdownPreviewActive = false;
 let pendingDeleteId = null;
+let pendingConfirmAction = null;
+let pendingBackupFile = null;
+
+class AuthRequiredError extends Error {}
 
 const sortFieldLabels = {
   name: "Name",
   updatedAt: "Date modified",
-  tokens: "Token count",
   createdAt: "Date created"
 };
 
@@ -103,23 +149,46 @@ const viewModeLabels = {
 
 const viewModeIcons = {
   grid: `
-    <path d="M4 4h7v7H4z" />
-    <path d="M13 4h7v7h-7z" />
-    <path d="M4 13h7v7H4z" />
-    <path d="M13 13h7v7h-7z" />
+    <path d="M200-520q-33 0-56.5-23.5T120-600v-160q0-33 23.5-56.5T200-840h160q33 0 56.5 23.5T440-760v160q0 33-23.5 56.5T360-520H200Zm0 400q-33 0-56.5-23.5T120-200v-160q0-33 23.5-56.5T200-440h160q33 0 56.5 23.5T440-360v160q0 33-23.5 56.5T360-120H200Zm400-400q-33 0-56.5-23.5T520-600v-160q0-33 23.5-56.5T600-840h160q33 0 56.5 23.5T840-760v160q0 33-23.5 56.5T760-520H600Zm0 400q-33 0-56.5-23.5T520-200v-160q0-33 23.5-56.5T600-440h160q33 0 56.5 23.5T840-360v160q0 33-23.5 56.5T760-120H600ZM200-600h160v-160H200v160Zm400 0h160v-160H600v160Zm0 400h160v-160H600v160Zm-400 0h160v-160H200v160Zm400-400Zm0 240Zm-240 0Zm0-240Z" />
   `,
   list: `
-    <path d="M8 6h12" />
-    <path d="M8 12h12" />
-    <path d="M8 18h12" />
-    <path d="M4 6h.01" />
-    <path d="M4 12h.01" />
-    <path d="M4 18h.01" />
+    <path d="M320-600q-17 0-28.5-11.5T280-640q0-17 11.5-28.5T320-680h480q17 0 28.5 11.5T840-640q0 17-11.5 28.5T800-600H320Zm0 160q-17 0-28.5-11.5T280-480q0-17 11.5-28.5T320-520h480q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H320Zm0 160q-17 0-28.5-11.5T280-320q0-17 11.5-28.5T320-360h480q17 0 28.5 11.5T840-320q0 17-11.5 28.5T800-280H320ZM160-600q-17 0-28.5-11.5T120-640q0-17 11.5-28.5T160-680q17 0 28.5 11.5T200-640q0 17-11.5 28.5T160-600Zm0 160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520q17 0 28.5 11.5T200-480q0 17-11.5 28.5T160-440Zm0 160q-17 0-28.5-11.5T120-320q0-17 11.5-28.5T160-360q17 0 28.5 11.5T200-320q0 17-11.5 28.5T160-280Z" />
+  `
+};
+
+const greetingIcons = {
+  up: `
+    <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+      <path d="M440-608 324-492q-11 11-28 11t-28-11q-11-11-11-28t11-28l184-184q12-12 28-12t28 12l184 184q11 11 11 28t-11 28q-11 11-28 11t-28-11L520-608v328q0 17-11.5 28.5T480-240q-17 0-28.5-11.5T440-280v-328Z" />
+    </svg>
+  `,
+  down: `
+    <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+      <path d="M440-392v-328q0-17 11.5-28.5T480-760q17 0 28.5 11.5T520-720v328l116-116q11-11 28-11t28 11q11 11 11 28t-11 28L508-268q-12 12-28 12t-28-12L268-452q-11-11-11-28t11-28q11-11 28-11t28 11l116 116Z" />
+    </svg>
+  `,
+  remove: `
+    <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+      <path d="M240-440q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h480q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H240Z" />
+    </svg>
+  `
+};
+
+const themeIcons = {
+  dark: `
+    <path d="M480-360q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T280-480q0-83 58.5-141.5T480-680q83 0 141.5 58.5T680-480q0 83-58.5 141.5T480-280ZM200-440H80q-17 0-28.5-11.5T40-480q0-17 11.5-28.5T80-520h120q17 0 28.5 11.5T240-480q0 17-11.5 28.5T200-440Zm680 0H760q-17 0-28.5-11.5T720-480q0-17 11.5-28.5T760-520h120q17 0 28.5 11.5T920-480q0 17-11.5 28.5T880-440ZM480-720q-17 0-28.5-11.5T440-760v-120q0-17 11.5-28.5T480-920q17 0 28.5 11.5T520-880v120q0 17-11.5 28.5T480-720Zm0 680q-17 0-28.5-11.5T440-80v-120q0-17 11.5-28.5T480-240q17 0 28.5 11.5T520-200v120q0 17-11.5 28.5T480-40ZM256-650l-69-68q-12-12-12-28.5t12-28.5q12-12 28.5-12t28.5 12l68 69q11 12 11 28t-11 28q-11 12-28 12t-28-12Zm460 460-68-69q-11-12-11-28t11-28q11-12 28-12t28 12l69 68q12 12 12 28.5T773-190q-12 12-28.5 12T716-190Zm-68-460q-11-12-11-28t11-28l68-69q12-12 28.5-12t28.5 12q12 12 12 28.5T773-718l-69 68q-11 12-28 12t-28-12ZM187-190q-12-12-12-28.5t12-28.5l69-68q11-12 28-12t28 12q11 12 11 28t-11 28l-68 69q-12 12-28.5 12T187-190Zm293-290Z" />
+  `,
+  light: `
+    <path d="M480-120q-150 0-255-105T120-480q0-138 90-239.5T440-838q13-2 23 3.5t16 14.5q6 9 6.5 21t-7.5 23q-17 26-25.5 55T444-660q0 90 63 153t153 63q31 0 61-8.5t55-25.5q11-7 23-7t21 5q10 6 15.5 16t3.5 24q-14 140-116.5 230T480-120Zm0-80q88 0 158-48.5T740-375q-20 5-40 8t-40 3q-123 0-209.5-86.5T364-660q0-20 3-40t8-40q-78 32-126.5 102T200-480q0 116 82 198t198 82Zm-10-270Z" />
   `
 };
 
 function uid() {
   return `card-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function personaUid() {
+  return `persona-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function emptyCard() {
@@ -143,7 +212,28 @@ function emptyCard() {
       character_version: "1.0",
       extensions: {}
     },
-    imageDataUrl: ""
+    imageDataUrl: "",
+    imageThumbnailDataUrl: "",
+    imagePath: "",
+    thumbnailPath: "",
+    imageUrl: "",
+    thumbnailUrl: ""
+  };
+}
+
+function emptyPersona() {
+  return {
+    id: personaUid(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    name: "",
+    description: "",
+    imageDataUrl: "",
+    imageThumbnailDataUrl: "",
+    imagePath: "",
+    thumbnailPath: "",
+    imageUrl: "",
+    thumbnailUrl: ""
   };
 }
 
@@ -168,21 +258,23 @@ function normalizeImportedCard(raw) {
 }
 
 function toSillyTavernJson(card) {
+  const sourceData = card.data || {};
   const data = {
-    name: card.data.name || "",
-    description: card.data.description || "",
-    personality: card.data.personality || "",
-    scenario: card.data.scenario || "",
-    first_mes: card.data.first_mes || "",
-    mes_example: card.data.mes_example || "",
-    creator_notes: card.data.creator_notes || "",
-    system_prompt: card.data.system_prompt || "",
-    post_history_instructions: card.data.post_history_instructions || "",
-    alternate_greetings: card.data.alternate_greetings || [],
-    tags: card.data.tags || [],
-    creator: card.data.creator || "",
-    character_version: card.data.character_version || "",
-    extensions: card.data.extensions || {}
+    ...sourceData,
+    name: sourceData.name || "",
+    description: sourceData.description || "",
+    personality: sourceData.personality || "",
+    scenario: sourceData.scenario || "",
+    first_mes: sourceData.first_mes || "",
+    mes_example: sourceData.mes_example || "",
+    creator_notes: sourceData.creator_notes || "",
+    system_prompt: sourceData.system_prompt || "",
+    post_history_instructions: sourceData.post_history_instructions || "",
+    alternate_greetings: sourceData.alternate_greetings || [],
+    tags: sourceData.tags || [],
+    creator: sourceData.creator || "",
+    character_version: sourceData.character_version || "",
+    extensions: sourceData.extensions || {}
   };
 
   return {
@@ -233,11 +325,30 @@ function splitLinesOrCommas(value) {
 }
 
 function normalizeStoredCard(card) {
+  const hasImageField = Object.prototype.hasOwnProperty.call(card, "imageDataUrl");
+  const hasThumbnailField = Object.prototype.hasOwnProperty.call(card, "imageThumbnailDataUrl");
+  const imageDataUrl = typeof card.imageDataUrl === "string" ? card.imageDataUrl : "";
+  const imageThumbnailDataUrl =
+    typeof card.imageThumbnailDataUrl === "string" ? card.imageThumbnailDataUrl : "";
+  const imagePath = typeof card.imagePath === "string" ? card.imagePath : "";
+  const thumbnailPath = typeof card.thumbnailPath === "string" ? card.thumbnailPath : "";
+  const imageUrl = typeof card.imageUrl === "string" ? card.imageUrl : "";
+  const thumbnailUrl = typeof card.thumbnailUrl === "string" ? card.thumbnailUrl : "";
   return {
     ...emptyCard(),
     ...card,
     createdAt: card.createdAt || card.updatedAt || new Date().toISOString(),
     updatedAt: card.updatedAt || card.createdAt || new Date().toISOString(),
+    imageDataUrl,
+    imageThumbnailDataUrl,
+    imagePath,
+    thumbnailPath,
+    imageUrl,
+    thumbnailUrl,
+    hasImage: Boolean(imageDataUrl || imagePath || imageUrl || imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || card.hasImage),
+    hasThumbnail: Boolean(imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || card.hasThumbnail),
+    imageLoaded: hasImageField || Boolean(imagePath || imageUrl) || !card.hasImage,
+    thumbnailLoaded: hasThumbnailField || Boolean(thumbnailPath || thumbnailUrl) || !card.hasImage,
     data: {
       ...emptyCard().data,
       ...(card.data || {}),
@@ -251,13 +362,141 @@ function normalizeStoredCard(card) {
   };
 }
 
+function normalizeStoredPersona(persona) {
+  const hasImageField = Object.prototype.hasOwnProperty.call(persona, "imageDataUrl");
+  const hasThumbnailField = Object.prototype.hasOwnProperty.call(persona, "imageThumbnailDataUrl");
+  const imageDataUrl = typeof persona.imageDataUrl === "string" ? persona.imageDataUrl : "";
+  const imageThumbnailDataUrl =
+    typeof persona.imageThumbnailDataUrl === "string" ? persona.imageThumbnailDataUrl : "";
+  const imagePath = typeof persona.imagePath === "string" ? persona.imagePath : "";
+  const thumbnailPath = typeof persona.thumbnailPath === "string" ? persona.thumbnailPath : "";
+  const imageUrl = typeof persona.imageUrl === "string" ? persona.imageUrl : "";
+  const thumbnailUrl = typeof persona.thumbnailUrl === "string" ? persona.thumbnailUrl : "";
+  return {
+    ...emptyPersona(),
+    ...persona,
+    name: persona.name || "",
+    description: persona.description || "",
+    createdAt: persona.createdAt || persona.updatedAt || new Date().toISOString(),
+    updatedAt: persona.updatedAt || persona.createdAt || new Date().toISOString(),
+    imageDataUrl,
+    imageThumbnailDataUrl,
+    imagePath,
+    thumbnailPath,
+    imageUrl,
+    thumbnailUrl,
+    hasImage: Boolean(imageDataUrl || imagePath || imageUrl || imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || persona.hasImage),
+    hasThumbnail: Boolean(imageThumbnailDataUrl || thumbnailPath || thumbnailUrl || persona.hasThumbnail),
+    imageLoaded: hasImageField || Boolean(imagePath || imageUrl) || !persona.hasImage,
+    thumbnailLoaded: hasThumbnailField || Boolean(thumbnailPath || thumbnailUrl) || !persona.hasImage
+  };
+}
+
+function toStoredCard(card) {
+  const storedCard = cloneCard(card);
+  delete storedCard.hasImage;
+  delete storedCard.hasThumbnail;
+  delete storedCard.imageLoaded;
+  delete storedCard.thumbnailLoaded;
+  delete storedCard.imageUrl;
+  delete storedCard.thumbnailUrl;
+  if (!storedCard.imageDataUrl) delete storedCard.imageDataUrl;
+  if (!storedCard.imageThumbnailDataUrl) delete storedCard.imageThumbnailDataUrl;
+  if (!storedCard.imagePath) delete storedCard.imagePath;
+  if (!storedCard.thumbnailPath) delete storedCard.thumbnailPath;
+  return storedCard;
+}
+
+function toStoredPersona(persona) {
+  const storedPersona = cloneCard(persona);
+  delete storedPersona.hasImage;
+  delete storedPersona.hasThumbnail;
+  delete storedPersona.imageLoaded;
+  delete storedPersona.thumbnailLoaded;
+  delete storedPersona.imageUrl;
+  delete storedPersona.thumbnailUrl;
+  if (!storedPersona.imageDataUrl) delete storedPersona.imageDataUrl;
+  if (!storedPersona.imageThumbnailDataUrl) delete storedPersona.imageThumbnailDataUrl;
+  if (!storedPersona.imagePath) delete storedPersona.imagePath;
+  if (!storedPersona.thumbnailPath) delete storedPersona.thumbnailPath;
+  return storedPersona;
+}
+
+function cardsForRecovery(cards = state.cards) {
+  const recoveryCards = cards.map(toStoredCard);
+  if (!state.draftCard) return recoveryCards;
+  const draftCard = toStoredCard(state.draftCard);
+  const draftIndex = recoveryCards.findIndex((card) => card.id === draftCard.id);
+  if (draftIndex >= 0) {
+    recoveryCards[draftIndex] = draftCard;
+  } else {
+    recoveryCards.unshift(draftCard);
+  }
+  return recoveryCards;
+}
+
+function saveRecoverySnapshot(cards = cardsForRecovery()) {
+  localStorage.setItem(recoveryStorageKey, JSON.stringify(cards));
+}
+
+function restoreRecoverySnapshot(serverCards) {
+  let recoveryCards = [];
+  try {
+    recoveryCards = JSON.parse(localStorage.getItem(recoveryStorageKey)) || [];
+  } catch {
+    recoveryCards = [];
+  }
+
+  if (!Array.isArray(recoveryCards) || !recoveryCards.length) return serverCards;
+
+  const mergedCards = serverCards.map(normalizeStoredCard);
+  for (const recoveryCard of recoveryCards.map(normalizeStoredCard)) {
+    const index = mergedCards.findIndex((card) => card.id === recoveryCard.id);
+    if (index >= 0) {
+      const serverTime = cardDateValue(mergedCards[index], "updatedAt");
+      const recoveryTime = cardDateValue(recoveryCard, "updatedAt");
+      if (recoveryTime >= serverTime) mergedCards[index] = recoveryCard;
+    } else {
+      mergedCards.unshift(recoveryCard);
+    }
+  }
+
+  localStorage.removeItem(recoveryStorageKey);
+  showToast("Recovered unsaved changes from before sign-in.");
+  return mergedCards;
+}
+
+async function redirectIfAuthRequired(response) {
+  if (response.status !== 401) return;
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (payload.code === "AUTH_REQUIRED") {
+    throw new AuthRequiredError("Authentication required");
+  }
+}
+
+function redirectToLogin() {
+  window.location.href = "/login";
+}
+
 async function loadCards() {
   let serverCards = [];
   try {
-    const response = await fetch("/api/cards");
-    if (!response.ok) throw new Error(`Could not load cards: ${response.status}`);
+    const response = await fetch("/api/cards/summary");
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not load cards: ${response.status}`);
+    }
     serverCards = await response.json();
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      throw error;
+    }
     try {
       serverCards = JSON.parse(localStorage.getItem(storageKey)) || [];
       showToast("Using browser backup. Could not read the app data folder.");
@@ -278,19 +517,51 @@ async function loadCards() {
     await persistCards(serverCards);
   }
 
-  state.cards = Array.isArray(serverCards) ? serverCards.map(normalizeStoredCard) : [];
+  const normalizedServerCards = Array.isArray(serverCards)
+    ? serverCards.map(normalizeStoredCard)
+    : [];
+  state.cards = restoreRecoverySnapshot(normalizedServerCards);
   state.activeId = state.cards[0]?.id || null;
 }
 
-function cardTokenCount(card) {
-  return countTokens([
-    card.data.name,
-    card.data.description,
-    card.data.personality,
-    card.data.scenario,
-    card.data.first_mes,
-    card.data.mes_example
-  ].join("\n"));
+async function loadPersonas() {
+  let serverPersonas = [];
+  try {
+    const response = await fetch("/api/personas/summary");
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not load personas: ${response.status}`);
+    }
+    serverPersonas = await response.json();
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      throw error;
+    }
+    try {
+      serverPersonas = JSON.parse(localStorage.getItem(personaStorageKey)) || [];
+      showToast("Using browser persona backup. Could not read the app data folder.");
+    } catch {
+      serverPersonas = [];
+    }
+  }
+
+  let browserPersonas = [];
+  try {
+    browserPersonas = JSON.parse(localStorage.getItem(personaStorageKey)) || [];
+  } catch {
+    browserPersonas = [];
+  }
+
+  if (!serverPersonas.length && browserPersonas.length) {
+    serverPersonas = browserPersonas;
+    await persistPersonas(serverPersonas);
+  }
+
+  state.personas = Array.isArray(serverPersonas)
+    ? serverPersonas.map(normalizeStoredPersona)
+    : [];
+  state.activePersonaId = state.personas[0]?.id || null;
 }
 
 function cardDateValue(card, key) {
@@ -302,14 +573,46 @@ async function persistCards(cards = state.cards) {
     const response = await fetch("/api/cards", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cards)
+      body: JSON.stringify(cards.map(toStoredCard))
     });
-    if (!response.ok) throw new Error(`Could not save cards: ${response.status}`);
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not save cards: ${response.status}`);
+    }
     localStorage.removeItem(storageKey);
   } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      saveRecoverySnapshot(cardsForRecovery(cards));
+      redirectToLogin();
+      return;
+    }
     console.error(error);
     localStorage.setItem(storageKey, JSON.stringify(cards));
     showToast("Could not save to the app folder. Saved a browser backup.");
+  }
+}
+
+async function persistPersonas(personas = state.personas) {
+  try {
+    const response = await fetch("/api/personas", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(personas.map(toStoredPersona))
+    });
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not save personas: ${response.status}`);
+    }
+    localStorage.removeItem(personaStorageKey);
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      localStorage.setItem(personaStorageKey, JSON.stringify(personas.map(toStoredPersona)));
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    localStorage.setItem(personaStorageKey, JSON.stringify(personas));
+    showToast("Could not save personas to the app folder. Saved a browser backup.");
   }
 }
 
@@ -323,6 +626,111 @@ function activeCard() {
 
 function editorCard() {
   return state.draftCard || activeCard();
+}
+
+function activePersona() {
+  return state.personas.find((persona) => persona.id === state.activePersonaId) || state.personas[0];
+}
+
+function editorPersona() {
+  return state.draftPersona || activePersona();
+}
+
+function cardThumbnailSource(card) {
+  return card?.imageThumbnailDataUrl || card?.thumbnailUrl || "";
+}
+
+function itemThumbnailSource(item) {
+  return item?.imageThumbnailDataUrl || item?.thumbnailUrl || "";
+}
+
+async function loadFullCard(card) {
+  if (!card || card.imageLoaded || !card.hasImage) return card;
+  const response = await fetch(`/api/cards/${encodeURIComponent(card.id)}`);
+  if (!response.ok) {
+    await redirectIfAuthRequired(response);
+    throw new Error(`Could not load card: ${response.status}`);
+  }
+  const fullCard = normalizeStoredCard(await response.json());
+  const index = state.cards.findIndex((item) => item.id === fullCard.id);
+  if (index !== -1) state.cards[index] = fullCard;
+  return fullCard;
+}
+
+async function loadFullImageForExport(card) {
+  if (!card || card.imageDataUrl || !card.hasImage) return card;
+  const fullCard = await loadFullCard(card);
+  if (fullCard.imageDataUrl || !fullCard.imageUrl) return fullCard;
+  fullCard.imageDataUrl = await urlToDataUrl(fullCard.imageUrl);
+  fullCard.imageLoaded = true;
+  return fullCard;
+}
+
+async function loadFullPersonaImage(persona) {
+  if (!persona || persona.imageDataUrl || !persona.hasImage) return persona;
+  if (!persona.imageUrl) return persona;
+  persona.imageDataUrl = await urlToDataUrl(persona.imageUrl);
+  persona.imageLoaded = true;
+  return persona;
+}
+
+function needsThumbnailMigration(card) {
+  return Boolean(card?.hasImage && !card.imageThumbnailDataUrl && !card.thumbnailUrl);
+}
+
+function queueThumbnailMigration() {
+  const missingCount = state.cards.filter(needsThumbnailMigration).length;
+  if (!missingCount || state.isMigratingThumbnails) return;
+  const schedule = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 250));
+  schedule(() => migrateThumbnails());
+}
+
+async function migrateThumbnails() {
+  if (state.isMigratingThumbnails) return;
+  state.isMigratingThumbnails = true;
+  const missing = state.cards.filter(needsThumbnailMigration);
+  if (!missing.length) {
+    state.isMigratingThumbnails = false;
+    return;
+  }
+
+  showToast(`Creating ${missing.length} image thumbnails...`);
+  let migratedCount = 0;
+
+  for (const summaryCard of missing) {
+    const currentCard = state.cards.find((card) => card.id === summaryCard.id);
+    if (!needsThumbnailMigration(currentCard)) continue;
+
+    try {
+      const fullCard = await loadFullImageForExport(currentCard);
+      if (!fullCard?.imageDataUrl) continue;
+      fullCard.imageThumbnailDataUrl = await createThumbnailDataUrl(fullCard.imageDataUrl);
+      fullCard.hasImage = true;
+      fullCard.hasThumbnail = true;
+      fullCard.thumbnailLoaded = true;
+      fullCard.imageDataUrl = "";
+      fullCard.imageLoaded = false;
+
+      if (state.draftCard?.id === fullCard.id && !state.isDirty) {
+        state.draftCard = cloneCard(fullCard);
+        if (isEditorVisible()) writeForm(state.draftCard);
+      }
+
+      renderLibrary();
+      await persistCards();
+      migratedCount += 1;
+      await wait(80);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        redirectToLogin();
+        return;
+      }
+      console.error(error);
+    }
+  }
+
+  state.isMigratingThumbnails = false;
+  if (migratedCount) showToast(`Created ${migratedCount} image thumbnails.`);
 }
 
 function syncDraftToLibrary() {
@@ -366,6 +774,24 @@ function updateViewModeButton() {
   const icon = elements.viewModeButton.querySelector("svg");
   if (label) label.textContent = viewModeLabels[state.viewMode];
   if (icon) icon.innerHTML = viewModeIcons[state.viewMode];
+}
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  const isLight = nextTheme === "light";
+  document.documentElement.dataset.theme = nextTheme;
+  const icon = elements.themeToggle?.querySelector("svg");
+  if (icon) icon.innerHTML = themeIcons[nextTheme];
+  elements.themeToggle?.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+  elements.themeToggle?.setAttribute("title", isLight ? "Switch to dark theme" : "Switch to light theme");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isLight ? "#f4f1eb" : "#151515");
+  try {
+    localStorage.setItem(themeStorageKey, nextTheme);
+  } catch {}
 }
 
 function isEditorVisible() {
@@ -426,10 +852,7 @@ function filteredCards() {
     let firstValue;
     let secondValue;
 
-    if (state.sortField === "tokens") {
-      firstValue = cardTokenCount(first);
-      secondValue = cardTokenCount(second);
-    } else if (state.sortField === "updatedAt" || state.sortField === "createdAt") {
+    if (state.sortField === "updatedAt" || state.sortField === "createdAt") {
       firstValue = cardDateValue(first, state.sortField);
       secondValue = cardDateValue(second, state.sortField);
     } else {
@@ -444,49 +867,133 @@ function filteredCards() {
   });
 }
 
+function filteredPersonas() {
+  const query = state.search.trim().toLowerCase();
+  const personas = state.personas.filter((persona) => {
+    const haystack = [persona.name, persona.description].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+
+  return personas.sort((first, second) => {
+    let firstValue;
+    let secondValue;
+
+    if (state.sortField === "updatedAt" || state.sortField === "createdAt") {
+      firstValue = cardDateValue(first, state.sortField);
+      secondValue = cardDateValue(second, state.sortField);
+    } else {
+      firstValue = (first.name || "Untitled persona").toLowerCase();
+      secondValue = (second.name || "Untitled persona").toLowerCase();
+    }
+
+    const direction = state.sortDirection === "desc" ? -1 : 1;
+    if (firstValue > secondValue) return direction;
+    if (firstValue < secondValue) return -direction;
+    return 0;
+  });
+}
+
+function activeLibraryPageKey() {
+  return state.activeLibraryType === "personas" ? "personas" : "characters";
+}
+
+function resetActiveLibraryPage() {
+  state.libraryPages[activeLibraryPageKey()] = 1;
+}
+
+function paginatedLibraryItems(items) {
+  const pageKey = activeLibraryPageKey();
+  const pageCount = Math.max(1, Math.ceil(items.length / libraryPageSize));
+  const currentPage = Math.min(Math.max(1, state.libraryPages[pageKey] || 1), pageCount);
+  state.libraryPages[pageKey] = currentPage;
+  const start = (currentPage - 1) * libraryPageSize;
+  return {
+    currentPage,
+    pageCount,
+    pageItems: items.slice(start, start + libraryPageSize)
+  };
+}
+
 function renderLibrary() {
-  const cards = filteredCards();
+  const isPersonas = state.activeLibraryType === "personas";
+  const items = isPersonas ? filteredPersonas() : filteredCards();
+  const { currentPage, pageCount, pageItems } = paginatedLibraryItems(items);
+  const totalItems = isPersonas ? state.personas.length : state.cards.length;
 
   elements.libraryGrid.innerHTML = "";
-  elements.librarySectionTitle.textContent = `Characters (${cards.length})`;
-  elements.emptyState.hidden = cards.length > 0;
+  elements.librarySectionTitle.textContent = `${isPersonas ? "Personas" : "Characters"} (${items.length})`;
+  elements.emptyState.hidden = items.length > 0;
+  elements.pagination.hidden = items.length <= libraryPageSize;
+  elements.paginationStatus.textContent = `Page ${currentPage} of ${pageCount}`;
+  elements.paginationPrev.disabled = currentPage <= 1;
+  elements.paginationNext.disabled = currentPage >= pageCount;
   elements.libraryGrid.classList.toggle("is-list-view", state.viewMode === "list");
+  elements.filterMenu.hidden = isPersonas;
+  elements.importInput.closest(".file-button").style.display = isPersonas ? "none" : "";
+  updateNewButtonLabel(isPersonas ? "New persona" : "New character");
+  elements.search.placeholder = isPersonas ? "Name, description..." : "Name, tag, creator...";
+  elements.charactersTab.classList.toggle("active", !isPersonas);
+  elements.personasTab.classList.toggle("active", isPersonas);
   renderFilterTags();
   updateSortButtons();
   updateViewModeButton();
 
-  if (!state.cards.length) {
-    elements.emptyState.querySelector("h3").textContent = "No characters yet";
-    elements.emptyState.querySelector("p").textContent = "Create a new character or import a JSON card.";
+  if (!totalItems) {
+    elements.emptyState.querySelector("h3").textContent = isPersonas ? "No personas yet" : "No characters yet";
+    elements.emptyState.querySelector("p").textContent = isPersonas
+      ? "Create a persona and add the text you want to copy into SillyTavern."
+      : "Create a new character or import a JSON card.";
   } else {
-    elements.emptyState.querySelector("h3").textContent = "No characters found";
-    elements.emptyState.querySelector("p").textContent = "Create a new character or clear your search.";
+    elements.emptyState.querySelector("h3").textContent = isPersonas ? "No personas found" : "No characters found";
+    elements.emptyState.querySelector("p").textContent = isPersonas
+      ? "Clear your search to see more personas."
+      : "Create a new character or clear your search.";
   }
 
-  for (const card of cards) {
+  for (const item of pageItems) {
+    if (isPersonas) {
+      renderPersonaLibraryItem(item);
+    } else {
+      renderCharacterLibraryItem(item);
+    }
+  }
+}
+
+function updateNewButtonLabel(label) {
+  const text = elements.newButton.querySelector("span");
+  if (text) {
+    text.textContent = label;
+    return;
+  }
+  elements.newButton.textContent = label;
+}
+
+function renderCharacterLibraryItem(card) {
     const libraryDescription =
       card.data.creator_notes?.trim() || card.data.description?.trim() || "No description yet.";
-    const tokenCount = cardTokenCount(card);
     const updatedDate = formatShortDate(card.updatedAt);
     const createdDate = formatShortDate(card.createdAt || card.updatedAt);
+    const subtitle = [card.data.creator, card.data.character_version]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(" - ");
     const button = document.createElement("button");
     button.type = "button";
     button.className = "library-item";
     button.innerHTML = `
       <div class="library-item__top">
         <div class="library-initial">
-          ${card.imageDataUrl
-            ? `<img src="${escapeHtml(card.imageDataUrl)}" alt="" />`
+          ${cardThumbnailSource(card)
+            ? `<img src="${escapeHtml(cardThumbnailSource(card))}" alt="" />`
             : escapeHtml((card.data.name || "U").slice(0, 1).toUpperCase())}
         </div>
         <div>
           <h3>${escapeHtml(card.data.name || "Untitled")}</h3>
-          <p>${escapeHtml([card.data.creator, card.data.character_version].filter(Boolean).join(" - ") || "JSON V2")}</p>
+          ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
         </div>
       </div>
       <p>${escapeHtml(shorten(libraryDescription, 150))}</p>
       <div class="library-item__meta">
-        <span class="meta-pill token-meta">${escapeHtml(tokenLabel(tokenCount))}</span>
         <span class="meta-pill date-meta">Modified ${escapeHtml(updatedDate)}</span>
         <span class="meta-pill date-meta">Created ${escapeHtml(createdDate)}</span>
         ${(card.data.tags || []).slice(0, 4).map((tag) => `<span class="meta-pill">${escapeHtml(tag)}</span>`).join("")}
@@ -498,7 +1005,30 @@ function renderLibrary() {
       showEditor();
     });
     elements.libraryGrid.append(button);
-  }
+}
+
+function renderPersonaLibraryItem(persona) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "library-item";
+  button.innerHTML = `
+    <div class="library-item__top">
+      <div class="library-initial">
+        ${itemThumbnailSource(persona)
+          ? `<img src="${escapeHtml(itemThumbnailSource(persona))}" alt="" />`
+          : escapeHtml((persona.name || "P").slice(0, 1).toUpperCase())}
+      </div>
+      <div>
+        <h3>${escapeHtml(persona.name || "Untitled persona")}</h3>
+      </div>
+    </div>
+    <p>${escapeHtml(shorten(persona.description || "No description yet.", 150))}</p>
+  `;
+  button.addEventListener("click", () => {
+    state.activePersonaId = persona.id;
+    showPersonaEditor();
+  });
+  elements.libraryGrid.append(button);
 }
 
 function renderFilterTags() {
@@ -534,23 +1064,14 @@ function updatePreview() {
   const formData = new FormData(elements.form);
   const data = Object.fromEntries(formData.entries());
   const tags = splitLinesOrCommas(data.tags);
-  const countedFields = [
-    data.name,
-    data.description,
-    data.personality,
-    data.scenario,
-    data.first_mes,
-    data.mes_example
-  ];
-  const tokenCount = countTokens(countedFields.join("\n"));
   const name = data.name?.trim() || "Untitled";
 
   elements.title.textContent = name;
   elements.previewName.textContent = name;
-  elements.previewTokenCount.textContent = tokenLabel(tokenCount);
   elements.portraitInitial.textContent = name.slice(0, 1).toUpperCase();
-  elements.portraitImage.src = editorCard()?.imageDataUrl || "";
-  elements.portraitImage.hidden = !editorCard()?.imageDataUrl;
+  const portraitSource = cardThumbnailSource(editorCard());
+  elements.portraitImage.src = portraitSource;
+  elements.portraitImage.hidden = !portraitSource;
   const creatorNotes = data.creator_notes?.trim() || "";
   elements.previewDescription.textContent = creatorNotes;
   elements.previewDescription.hidden = !creatorNotes;
@@ -564,8 +1085,80 @@ function updatePreview() {
     pill.textContent = tag;
     elements.previewTags.append(pill);
   }
+}
 
-  updateTextareaTokenCounters();
+function readPersonaForm() {
+  const persona = editorPersona();
+  if (!persona) return;
+  const formData = new FormData(elements.personaForm);
+  persona.name = formData.get("name") || "";
+  persona.description = formData.get("description") || "";
+  persona.updatedAt = new Date().toISOString();
+}
+
+function writePersonaForm(persona) {
+  elements.personaName.value = persona.name || "";
+  elements.personaDescription.value = persona.description || "";
+  updatePersonaPreview();
+}
+
+function updatePersonaPreview() {
+  const formData = new FormData(elements.personaForm);
+  const name = formData.get("name")?.trim() || "Untitled persona";
+  const description = formData.get("description")?.trim() || "";
+  const persona = editorPersona();
+  const portraitSource = itemThumbnailSource(persona);
+
+  elements.personaTitle.textContent = name;
+  elements.personaPreviewName.textContent = name;
+  elements.personaPortraitInitial.textContent = name.slice(0, 1).toUpperCase();
+  elements.personaPortraitImage.src = portraitSource;
+  elements.personaPortraitImage.hidden = !portraitSource;
+  elements.personaPreviewDescription.textContent = description || "No description yet.";
+}
+
+function syncPersonaDraftToLibrary() {
+  if (!state.draftPersona) return activePersona();
+  const nextPersona = cloneCard(state.draftPersona);
+  nextPersona.updatedAt = new Date().toISOString();
+  const index = state.personas.findIndex((persona) => persona.id === nextPersona.id);
+  if (index >= 0) {
+    state.personas[index] = nextPersona;
+  } else {
+    state.personas.unshift(nextPersona);
+  }
+  state.activePersonaId = nextPersona.id;
+  state.draftPersona = cloneCard(nextPersona);
+  return nextPersona;
+}
+
+function setPersonaSaveStatus(isDirty) {
+  state.isPersonaDirty = isDirty;
+  elements.personaSaveStatus.textContent = isDirty ? "Unsaved changes" : "Saved";
+  elements.personaSaveStatus.classList.toggle("is-dirty", isDirty);
+}
+
+function hasUnsavedEditorChanges() {
+  return (state.view === "editor" && state.isDirty) || (state.view === "persona-editor" && state.isPersonaDirty);
+}
+
+function requestDiscardUnsavedChanges(action) {
+  if (!hasUnsavedEditorChanges()) {
+    action();
+    return;
+  }
+
+  openConfirmModal({
+    eyebrow: "Unsaved changes",
+    title: "Leave without saving?",
+    message: "Your current edits have not been saved. If you leave now, those changes will be discarded.",
+    submitLabel: "Discard changes",
+    submitDanger: true,
+    onConfirm: () => {
+      closeConfirmModal();
+      action();
+    }
+  });
 }
 
 function readAlternateGreetingFields() {
@@ -587,9 +1180,9 @@ function addAlternateGreetingField(value = "") {
     <div class="field-header">
       <span>Alternate greeting #${index}</span>
       <div class="alternate-actions">
-        <button class="move-greeting-button" type="button" data-direction="up" aria-label="Move alternate greeting up">↑</button>
-        <button class="move-greeting-button" type="button" data-direction="down" aria-label="Move alternate greeting down">↓</button>
-        <button class="remove-greeting-button" type="button" aria-label="Remove alternate greeting">-</button>
+        <button class="move-greeting-button" type="button" data-direction="up" aria-label="Move alternate greeting up">${greetingIcons.up}</button>
+        <button class="move-greeting-button" type="button" data-direction="down" aria-label="Move alternate greeting down">${greetingIcons.down}</button>
+        <button class="remove-greeting-button" type="button" aria-label="Remove alternate greeting">${greetingIcons.remove}</button>
       </div>
     </div>
     <textarea class="alternate-greeting" rows="5"></textarea>
@@ -627,69 +1220,15 @@ function enhanceTextareas(root = document) {
     button.className = "expand-editor-button";
     button.type = "button";
     button.innerHTML = `
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path d="M8 3H3v5" />
-        <path d="M3 3l7 7" />
-        <path d="M16 21h5v-5" />
-        <path d="M21 21l-7-7" />
+      <svg class="material-icon" aria-hidden="true" viewBox="0 -960 960 960">
+        <path d="M280-280h120q17 0 28.5 11.5T440-240q0 17-11.5 28.5T400-200H240q-17 0-28.5-11.5T200-240v-160q0-17 11.5-28.5T240-440q17 0 28.5 11.5T280-400v120Zm400-400H560q-17 0-28.5-11.5T520-720q0-17 11.5-28.5T560-760h160q17 0 28.5 11.5T760-720v160q0 17-11.5 28.5T720-520q-17 0-28.5-11.5T680-560v-120Z" />
       </svg>
     `;
     button.setAttribute("aria-label", `Open ${getTextareaLabel(textarea)} in fullscreen editor`);
     shell.append(button);
 
-    if (!textarea.dataset.noTokenCounter) {
-      const counter = document.createElement("span");
-      counter.className = "token-counter";
-      counter.setAttribute("aria-label", `Token count for ${getTextareaLabel(textarea)}`);
-      textarea.tokenCounter = counter;
-      placeTokenCounter(textarea, counter);
-    }
-
     textarea.dataset.enhancedEditor = "true";
-    updateTextareaTokenCounter(textarea);
   });
-}
-
-function placeTokenCounter(textarea, counter) {
-  const field = textarea.closest("label, .field-group, .alternate-field");
-  if (!field) return;
-
-  const header = field.querySelector(":scope > .field-header");
-  if (header) {
-    const action = header.querySelector(":scope > button, :scope > .alternate-actions");
-    if (action) {
-      header.insertBefore(counter, action);
-    } else {
-      header.append(counter);
-    }
-    return;
-  }
-
-  const label = field.querySelector(":scope > span");
-  if (!label) return;
-
-  const row = document.createElement("div");
-  row.className = "textarea-label-row";
-  label.parentNode.insertBefore(row, label);
-  row.append(label, counter);
-}
-
-function updateTextareaTokenCounters(root = elements.form) {
-  root.querySelectorAll("textarea").forEach(updateTextareaTokenCounter);
-}
-
-function updateTextareaTokenCounter(textarea) {
-  const counter = textarea.tokenCounter;
-  if (!counter) return;
-  counter.textContent = tokenLabel(countTokens(textarea.value));
-}
-
-function tokenLabel(count) {
-  return `${formatNumber(count)} ${count === 1 ? "token" : "tokens"}`;
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function formatShortDate(value) {
@@ -713,16 +1252,9 @@ function openFullscreenEditor(textarea) {
   setMarkdownPreviewActive(false);
   elements.fullscreenEditorTitle.textContent = getTextareaLabel(textarea);
   elements.fullscreenEditorTextarea.value = textarea.value;
-  elements.fullscreenTokenCount.hidden = Boolean(textarea.dataset.noTokenCounter);
-  updateFullscreenTokenCount();
   elements.fullscreenEditor.hidden = false;
   document.body.classList.add("modal-open");
   elements.fullscreenEditorTextarea.focus();
-}
-
-function updateFullscreenTokenCount() {
-  if (elements.fullscreenTokenCount.hidden) return;
-  elements.fullscreenTokenCount.textContent = tokenLabel(countTokens(elements.fullscreenEditorTextarea.value));
 }
 
 function setMarkdownPreviewActive(isActive) {
@@ -769,6 +1301,12 @@ function closeFullscreenEditor({ applyChanges = true } = {}) {
   elements.form
     .querySelectorAll(".textarea-shell.is-hovered")
     .forEach((shell) => shell.classList.remove("is-hovered"));
+  elements.personaForm
+    .querySelectorAll(".textarea-shell.is-active")
+    .forEach((shell) => shell.classList.remove("is-active"));
+  elements.personaForm
+    .querySelectorAll(".textarea-shell.is-hovered")
+    .forEach((shell) => shell.classList.remove("is-hovered"));
   activeFullscreenTextarea = null;
   setMarkdownPreviewActive(false);
   elements.fullscreenEditor.hidden = true;
@@ -786,22 +1324,58 @@ function render() {
 
 function showLibrary() {
   state.draftCard = null;
+  state.draftPersona = null;
   setSaveStatus(false);
+  setPersonaSaveStatus(false);
   state.view = "library";
   elements.libraryView.classList.remove("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
   elements.editorView.classList.add("is-hidden");
+  elements.personaEditorView.classList.add("is-hidden");
   renderLibrary();
+  requestAnimationFrame(() => window.scrollTo(0, state.libraryScrollY));
 }
 
-function showEditor() {
+function showSettings() {
+  if (state.view === "library") state.libraryScrollY = window.scrollY;
+  state.view = "settings";
+  elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.remove("is-hidden");
+  elements.editorView.classList.add("is-hidden");
+  elements.personaEditorView.classList.add("is-hidden");
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
+async function showEditor() {
+  if (state.view === "library") state.libraryScrollY = window.scrollY;
   state.view = "editor";
   elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
   elements.editorView.classList.remove("is-hidden");
+  elements.personaEditorView.classList.add("is-hidden");
+  window.scrollTo(0, 0);
   const card = activeCard();
   state.draftCard = card ? cloneCard(card) : null;
   if (state.draftCard) writeForm(state.draftCard);
   setSaveStatus(false);
   enhanceTextareas(elements.form);
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
+function showPersonaEditor() {
+  if (state.view === "library") state.libraryScrollY = window.scrollY;
+  state.view = "persona-editor";
+  elements.libraryView.classList.add("is-hidden");
+  elements.settingsView.classList.add("is-hidden");
+  elements.editorView.classList.add("is-hidden");
+  elements.personaEditorView.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
+  const persona = activePersona();
+  state.draftPersona = persona ? cloneCard(persona) : null;
+  if (state.draftPersona) writePersonaForm(state.draftPersona);
+  setPersonaSaveStatus(false);
+  enhanceTextareas(elements.personaForm);
+  requestAnimationFrame(() => window.scrollTo(0, 0));
 }
 
 function saveActiveCard() {
@@ -814,6 +1388,10 @@ function saveActiveCard() {
 }
 
 function createCard() {
+  if (state.activeLibraryType === "personas") {
+    createPersona();
+    return;
+  }
   state.draftCard = null;
   const card = emptyCard();
   card.data.name = "New card";
@@ -823,9 +1401,45 @@ function createCard() {
   showEditor();
 }
 
-function duplicateCard() {
+function createPersona() {
+  state.draftPersona = null;
+  const persona = emptyPersona();
+  persona.name = "New persona";
+  state.personas.unshift(persona);
+  state.activePersonaId = persona.id;
+  persistPersonas();
+  showPersonaEditor();
+}
+
+function saveActivePersona() {
+  readPersonaForm();
+  syncPersonaDraftToLibrary();
+  persistPersonas();
+  setPersonaSaveStatus(false);
+  renderLibrary();
+  showToast("Persona saved to the local library.");
+}
+
+async function duplicateCard() {
   readForm();
-  const current = editorCard();
+  let current = editorCard();
+  try {
+    current = await loadFullImageForExport(current);
+    if (state.draftCard && current !== state.draftCard) {
+      state.draftCard.imageDataUrl = current.imageDataUrl || "";
+      state.draftCard.imageLoaded = current.imageLoaded;
+      current = state.draftCard;
+    }
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      saveRecoverySnapshot();
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load the full image before duplicating.");
+    return;
+  }
   const clone = cloneCard(current);
   clone.id = uid();
   clone.updatedAt = new Date().toISOString();
@@ -838,34 +1452,76 @@ function duplicateCard() {
 }
 
 function requestDeleteCard() {
-  const current = activeCard();
+  const isPersona = state.view === "persona-editor";
+  const current = isPersona ? activePersona() : activeCard();
   if (!current) return;
   pendingDeleteId = current.id;
-  elements.deleteConfirmMessage.textContent = `Delete "${current.data.name || "Untitled"}"? This action cannot be undone.`;
+  openConfirmModal({
+    eyebrow: "Delete item",
+    title: "Delete this item?",
+    message: `Delete "${isPersona ? current.name || "Untitled persona" : current.data.name || "Untitled"}"? This action cannot be undone.`,
+    submitLabel: "Delete",
+    submitDanger: true,
+    onConfirm: confirmDeleteCard
+  });
+}
+
+function openConfirmModal({
+  eyebrow,
+  title,
+  message,
+  cancelLabel = "Cancel",
+  submitLabel,
+  submitDanger = false,
+  onConfirm
+}) {
+  pendingConfirmAction = onConfirm;
+  elements.deleteConfirmEyebrow.textContent = eyebrow;
+  elements.deleteConfirmTitle.textContent = title;
+  elements.deleteConfirmMessage.textContent = message;
+  elements.deleteConfirmCancel.textContent = cancelLabel;
+  elements.deleteConfirmSubmit.textContent = submitLabel;
+  elements.deleteConfirmSubmit.classList.toggle("danger", submitDanger);
   elements.deleteConfirmModal.hidden = false;
   document.body.classList.add("modal-open");
   elements.deleteConfirmCancel.focus();
 }
 
-function closeDeleteConfirm() {
+function closeConfirmModal() {
   pendingDeleteId = null;
+  pendingConfirmAction = null;
+  pendingBackupFile = null;
   elements.deleteConfirmModal.hidden = true;
   document.body.classList.remove("modal-open");
 }
 
+function submitConfirmModal() {
+  const action = pendingConfirmAction;
+  if (action) action();
+}
+
 function confirmDeleteCard() {
-  const current = state.cards.find((card) => card.id === pendingDeleteId);
+  const isPersona = state.view === "persona-editor";
+  const current = isPersona
+    ? state.personas.find((persona) => persona.id === pendingDeleteId)
+    : state.cards.find((card) => card.id === pendingDeleteId);
   if (!current) {
-    closeDeleteConfirm();
+    closeConfirmModal();
     return;
   }
 
-  state.cards = state.cards.filter((card) => card.id !== current.id);
-  state.activeId = state.cards[0]?.id || null;
-  persistCards();
-  closeDeleteConfirm();
+  if (isPersona) {
+    state.personas = state.personas.filter((persona) => persona.id !== current.id);
+    state.activePersonaId = state.personas[0]?.id || null;
+    persistPersonas();
+  } else {
+    state.cards = state.cards.filter((card) => card.id !== current.id);
+    state.activeId = state.cards[0]?.id || null;
+    persistCards();
+  }
+  closeConfirmModal();
   showLibrary();
-  showToast("Card deleted.");
+  showToast(isPersona ? "Persona deleted." : "Card deleted.");
 }
 
 function exportActiveCard() {
@@ -885,7 +1541,24 @@ function exportActiveCard() {
 
 async function exportActiveCardPng() {
   readForm();
-  const card = editorCard();
+  let card = editorCard();
+  try {
+    card = await loadFullImageForExport(card);
+    if (state.draftCard && card !== state.draftCard) {
+      state.draftCard.imageDataUrl = card.imageDataUrl || "";
+      state.draftCard.imageLoaded = card.imageLoaded;
+      card = state.draftCard;
+    }
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      saveRecoverySnapshot();
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load the full image for export.");
+    return;
+  }
   const basePng = card.imageDataUrl
     ? await imageDataUrlToPngBytes(card.imageDataUrl)
     : await generateFallbackPortraitPng(card.data.name || "Character");
@@ -902,6 +1575,142 @@ async function exportActiveCardPng() {
   showToast(`Exported: ${filename}`);
 }
 
+async function copyActivePersonaDescription() {
+  readPersonaForm();
+  const persona = editorPersona();
+  if (!persona) return;
+  const text = persona.description || "";
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      copyTextFallback(text);
+    }
+    showToast("Persona description copied.");
+  } catch (error) {
+    try {
+      copyTextFallback(text);
+      showToast("Persona description copied.");
+    } catch (fallbackError) {
+      console.error(error, fallbackError);
+      showToast("Could not copy the persona description.");
+    }
+  }
+}
+
+async function downloadActivePersonaImage() {
+  readPersonaForm();
+  let persona = editorPersona();
+  if (!persona?.hasImage && !persona?.imageDataUrl) {
+    showToast("This persona has no image.");
+    return;
+  }
+  try {
+    persona = await loadFullPersonaImage(persona);
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not load the persona image.");
+    return;
+  }
+  if (!persona.imageDataUrl) {
+    showToast("This persona has no image.");
+    return;
+  }
+  const response = await fetch(persona.imageDataUrl);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+  anchor.href = url;
+  anchor.download = `${slugify(persona.name || "persona-image")}.${extension}`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  showToast("Persona image downloaded.");
+}
+
+async function exportLibraryBackup() {
+  try {
+    const response = await fetch("/api/backup/export");
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not export backup: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const today = new Date().toISOString().slice(0, 10);
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    anchor.href = url;
+    anchor.download = filenameMatch?.[1] || `st-editor-backup-${today}.zip`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast("Library backup exported.");
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not export the library backup.");
+  }
+}
+
+function requestImportLibraryBackup(file) {
+  pendingBackupFile = file;
+  openConfirmModal({
+    eyebrow: "Import backup",
+    title: "Replace this library?",
+    message: "Importing a backup will replace the current cards, personas, and image assets in this app.",
+    submitLabel: "Import backup",
+    onConfirm: importPendingLibraryBackup
+  });
+}
+
+async function importPendingLibraryBackup() {
+  const file = pendingBackupFile;
+  closeConfirmModal();
+  pendingBackupFile = null;
+  if (!file) return;
+
+  try {
+    const response = await fetch("/api/backup/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      body: await file.arrayBuffer()
+    });
+    if (!response.ok) {
+      await redirectIfAuthRequired(response);
+      throw new Error(`Could not import backup: ${response.status}`);
+    }
+
+    localStorage.removeItem(storageKey);
+    localStorage.removeItem(personaStorageKey);
+    localStorage.removeItem(recoveryStorageKey);
+    state.draftCard = null;
+    state.draftPersona = null;
+    state.isDirty = false;
+    state.isPersonaDirty = false;
+    await loadCards();
+    await loadPersonas();
+    resetActiveLibraryPage();
+    renderLibrary();
+    showToast("Library backup imported.");
+  } catch (error) {
+    if (error instanceof AuthRequiredError) {
+      redirectToLogin();
+      return;
+    }
+    console.error(error);
+    showToast("Could not import the library backup.");
+  }
+}
+
 async function importCard(file) {
   const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
   if (isPng) {
@@ -909,6 +1718,11 @@ async function importCard(file) {
     const json = readCardJsonFromPng(bytes);
     const card = normalizeImportedCard(json);
     card.imageDataUrl = await fileToDataUrl(file);
+    card.imageThumbnailDataUrl = await createThumbnailDataUrl(card.imageDataUrl);
+    card.hasImage = true;
+    card.hasThumbnail = true;
+    card.imageLoaded = true;
+    card.thumbnailLoaded = true;
     state.cards.unshift(card);
     state.activeId = card.id;
     persistCards();
@@ -932,8 +1746,27 @@ async function setCardImage(file) {
   const card = editorCard();
   if (!card) return;
   card.imageDataUrl = await fileToDataUrl(file);
+  card.imageThumbnailDataUrl = await createThumbnailDataUrl(card.imageDataUrl);
+  card.hasImage = true;
+  card.hasThumbnail = true;
+  card.imageLoaded = true;
+  card.thumbnailLoaded = true;
   setSaveStatus(true);
   updatePreview();
+}
+
+async function setPersonaImage(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const persona = editorPersona();
+  if (!persona) return;
+  persona.imageDataUrl = await fileToDataUrl(file);
+  persona.imageThumbnailDataUrl = await createThumbnailDataUrl(persona.imageDataUrl);
+  persona.hasImage = true;
+  persona.hasThumbnail = true;
+  persona.imageLoaded = true;
+  persona.thumbnailLoaded = true;
+  setPersonaSaveStatus(true);
+  updatePersonaPreview();
 }
 
 function fileToDataUrl(file) {
@@ -943,6 +1776,16 @@ function fileToDataUrl(file) {
     reader.addEventListener("error", () => reject(reader.error));
     reader.readAsDataURL(file);
   });
+}
+
+async function urlToDataUrl(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    await redirectIfAuthRequired(response);
+    throw new Error(`Could not load image: ${response.status}`);
+  }
+  const blob = await response.blob();
+  return fileToDataUrl(blob);
 }
 
 async function imageDataUrlToPngBytes(dataUrl) {
@@ -955,6 +1798,19 @@ async function imageDataUrlToPngBytes(dataUrl) {
   const context = canvas.getContext("2d");
   context.drawImage(image, 0, 0);
   return dataUrlToBytes(canvas.toDataURL("image/png"));
+}
+
+async function createThumbnailDataUrl(dataUrl, maxSize = 384) {
+  const image = await loadImage(dataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/webp", 0.72);
 }
 
 async function generateFallbackPortraitPng(name) {
@@ -990,6 +1846,21 @@ function dataUrlToBytes(dataUrl) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   return bytes;
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.append(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Copy command failed");
 }
 
 function encodeBase64Utf8(value) {
@@ -1142,6 +2013,10 @@ function shorten(value, maxLength) {
   return `${text.slice(0, maxLength - 1).trim()}...`;
 }
 
+function wait(duration) {
+  return new Promise((resolve) => window.setTimeout(resolve, duration));
+}
+
 function showToast(message) {
   elements.toast.textContent = message;
   elements.toast.classList.add("visible");
@@ -1155,7 +2030,17 @@ elements.form.addEventListener("input", () => {
   updatePreview();
   setSaveStatus(true);
 });
+elements.personaForm.addEventListener("input", () => {
+  updatePersonaPreview();
+  setPersonaSaveStatus(true);
+});
 elements.form.addEventListener("click", (event) => {
+  const button = event.target.closest?.(".expand-editor-button");
+  if (!button) return;
+  const textarea = button.closest(".textarea-shell")?.querySelector("textarea");
+  if (textarea) openFullscreenEditor(textarea);
+});
+elements.personaForm.addEventListener("click", (event) => {
   const button = event.target.closest?.(".expand-editor-button");
   if (!button) return;
   const textarea = button.closest(".textarea-shell")?.querySelector("textarea");
@@ -1166,13 +2051,29 @@ elements.form.addEventListener("pointerover", (event) => {
   const shell = event.target.closest?.(".textarea-shell");
   if (shell) shell.classList.add("is-hovered");
 });
+elements.personaForm.addEventListener("pointerover", (event) => {
+  if (event.pointerType !== "mouse") return;
+  const shell = event.target.closest?.(".textarea-shell");
+  if (shell) shell.classList.add("is-hovered");
+});
 elements.form.addEventListener("pointerout", (event) => {
   if (event.pointerType !== "mouse") return;
   const shell = event.target.closest?.(".textarea-shell");
   if (!shell || shell.contains(event.relatedTarget)) return;
   shell.classList.remove("is-hovered");
 });
+elements.personaForm.addEventListener("pointerout", (event) => {
+  if (event.pointerType !== "mouse") return;
+  const shell = event.target.closest?.(".textarea-shell");
+  if (!shell || shell.contains(event.relatedTarget)) return;
+  shell.classList.remove("is-hovered");
+});
 elements.form.addEventListener("focusin", (event) => {
+  const shell = event.target.closest?.(".textarea-shell");
+  if (!shell) return;
+  shell.classList.add("is-active");
+});
+elements.personaForm.addEventListener("focusin", (event) => {
   const shell = event.target.closest?.(".textarea-shell");
   if (!shell) return;
   shell.classList.add("is-active");
@@ -1186,9 +2087,21 @@ elements.form.addEventListener("pointerdown", (event) => {
     });
   if (shell) shell.classList.add("is-active");
 });
+elements.personaForm.addEventListener("pointerdown", (event) => {
+  const shell = event.target.closest?.(".textarea-shell");
+  elements.personaForm
+    .querySelectorAll(".textarea-shell.is-active")
+    .forEach((activeShell) => {
+      if (activeShell !== shell) activeShell.classList.remove("is-active");
+    });
+  if (shell) shell.classList.add("is-active");
+});
 document.addEventListener("pointerdown", (event) => {
   if (event.target.closest?.(".textarea-shell, .fullscreen-editor")) return;
   elements.form
+    .querySelectorAll(".textarea-shell.is-active")
+    .forEach((shell) => shell.classList.remove("is-active"));
+  elements.personaForm
     .querySelectorAll(".textarea-shell.is-active")
     .forEach((shell) => shell.classList.remove("is-active"));
 });
@@ -1198,7 +2111,6 @@ elements.fullscreenMarkdownToggle.addEventListener("click", () => {
   setMarkdownPreviewActive(!isMarkdownPreviewActive);
 });
 elements.fullscreenEditorTextarea.addEventListener("input", () => {
-  updateFullscreenTokenCount();
   if (isMarkdownPreviewActive) setMarkdownPreviewActive(true);
 });
 elements.fullscreenEditor.addEventListener("keydown", (event) => {
@@ -1206,6 +2118,7 @@ elements.fullscreenEditor.addEventListener("keydown", (event) => {
 });
 elements.search.addEventListener("input", (event) => {
   state.search = event.target.value;
+  resetActiveLibraryPage();
   renderLibrary();
 });
 elements.filterTags.addEventListener("change", (event) => {
@@ -1216,6 +2129,7 @@ elements.filterTags.addEventListener("change", (event) => {
   } else {
     state.selectedTags.delete(input.value);
   }
+  resetActiveLibraryPage();
   renderLibrary();
 });
 elements.customSelects.forEach((select) => {
@@ -1237,11 +2151,40 @@ elements.customSelects.forEach((select) => {
       state.sortDirection = option.dataset.value;
     }
     closeCustomSelects();
+    resetActiveLibraryPage();
     renderLibrary();
   });
 });
 elements.viewModeButton.addEventListener("click", () => {
   state.viewMode = state.viewMode === "grid" ? "list" : "grid";
+  renderLibrary();
+});
+elements.themeToggle.addEventListener("click", () => {
+  applyTheme(currentTheme() === "light" ? "dark" : "light");
+});
+elements.settingsButton.addEventListener("click", showSettings);
+elements.paginationPrev.addEventListener("click", () => {
+  const pageKey = activeLibraryPageKey();
+  state.libraryPages[pageKey] = Math.max(1, (state.libraryPages[pageKey] || 1) - 1);
+  renderLibrary();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+elements.paginationNext.addEventListener("click", () => {
+  const pageKey = activeLibraryPageKey();
+  state.libraryPages[pageKey] = (state.libraryPages[pageKey] || 1) + 1;
+  renderLibrary();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+elements.charactersTab.addEventListener("click", () => {
+  state.activeLibraryType = "characters";
+  state.selectedTags.clear();
+  resetActiveLibraryPage();
+  renderLibrary();
+});
+elements.personasTab.addEventListener("click", () => {
+  state.activeLibraryType = "personas";
+  state.selectedTags.clear();
+  resetActiveLibraryPage();
   renderLibrary();
 });
 document.addEventListener("click", (event) => {
@@ -1252,25 +2195,56 @@ document.addEventListener("click", (event) => {
   }
 });
 elements.newButton.addEventListener("click", createCard);
-elements.backButton.addEventListener("click", showLibrary);
+elements.backButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
+elements.personaBackButton.addEventListener("click", () => requestDiscardUnsavedChanges(showLibrary));
+elements.settingsBackButton.addEventListener("click", showLibrary);
 elements.saveButton.addEventListener("click", saveActiveCard);
+elements.personaSaveButton.addEventListener("click", saveActivePersona);
+elements.personaCopyButton.addEventListener("click", copyActivePersonaDescription);
+elements.personaDownloadImageButton.addEventListener("click", downloadActivePersonaImage);
+elements.backupExportButton.addEventListener("click", exportLibraryBackup);
+elements.backupImportButton.addEventListener("click", () => elements.backupImportInput.click());
+elements.backupImportInput.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  requestImportLibraryBackup(file);
+});
 elements.exportButton.addEventListener("click", exportActiveCard);
 elements.exportPngButton.addEventListener("click", exportActiveCardPng);
 elements.duplicateButton.addEventListener("click", duplicateCard);
 elements.deleteButton.addEventListener("click", requestDeleteCard);
-elements.deleteConfirmCancel.addEventListener("click", closeDeleteConfirm);
-elements.deleteConfirmSubmit.addEventListener("click", confirmDeleteCard);
+elements.personaDeleteButton.addEventListener("click", requestDeleteCard);
+elements.deleteConfirmCancel.addEventListener("click", closeConfirmModal);
+elements.deleteConfirmSubmit.addEventListener("click", submitConfirmModal);
 elements.deleteConfirmModal.addEventListener("click", (event) => {
-  if (event.target.closest?.("[data-confirm-cancel]")) closeDeleteConfirm();
+  if (event.target.closest?.("[data-confirm-cancel]")) closeConfirmModal();
 });
 elements.deleteConfirmModal.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeDeleteConfirm();
+  if (event.key === "Escape") closeConfirmModal();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedEditorChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 elements.imageInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
   if (!file) return;
   try {
     await setCardImage(file);
+  } catch (error) {
+    console.error(error);
+    showToast("Could not use this image.");
+  } finally {
+    event.target.value = "";
+  }
+});
+elements.personaImageInput.addEventListener("change", async (event) => {
+  const [file] = event.target.files;
+  if (!file) return;
+  try {
+    await setPersonaImage(file);
   } catch (error) {
     console.error(error);
     showToast("Could not use this image.");
@@ -1323,6 +2297,18 @@ elements.importInput.addEventListener("change", async (event) => {
   }
 });
 
+applyTheme(currentTheme());
 await loadCards();
+await loadPersonas();
 enhanceTextareas(elements.form);
+enhanceTextareas(elements.personaForm);
 showLibrary();
+queueThumbnailMigration();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.error("Could not register service worker.", error);
+    });
+  });
+}
